@@ -21,9 +21,12 @@ open FParsec
 
 // Define the color parser
 let hexadecimalDigit = satisfy (fun c -> isDigit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
-let hexColorDigit3 = pipe3 hexadecimalDigit hexadecimalDigit hexadecimalDigit (fun c1 c2 c3 -> sprintf "%c%c%c" c1 c2 c3)
-let hexColorDigit6 = pipe2 hexColorDigit3 hexColorDigit3 (fun c1 c2 -> c1 + c2)
-let hexColor = pstring "#" >>. (hexColorDigit6 <|> hexColorDigit3) |>> (fun colorDigits -> "#" + colorDigits)
+
+let hexColor =
+    pstring "#" >>. manyChars hexadecimalDigit >>= fun hexDigits ->
+    match hexDigits.Length with
+    | 3 | 6 -> preturn ("#" + hexDigits)
+    | _ -> fail "Invalid hex color"
 
 let colorParser =
     choice [
@@ -75,20 +78,16 @@ test yOverX "y x" // Failure: Error in Ln: 1 Col: 3
 test yOverX "[y1, y2] x" // Failure: Error in Ln: 1 Col: 10
 test yOverX "[y1, y2], x, z" // Failure: Error in Ln: 1 Col: 13
 
-test hexColorDigit3 "abc" // Success: "abc"
-test hexColorDigit3 "123" // Success: "123"
-test hexColorDigit3 "a1b" // Success: "a1b"
-test hexColorDigit3 "a1" // Failure: Error in Ln: 1 Col: 3
-
-test hexColorDigit6 "abc123" // Success: "abc123"
-test hexColorDigit6 "123abc" // Success: "123abc"
-test hexColorDigit6 "a7b2c3" // Success: "a1b2c3"
-
 test colorParser "red" // Success: "red"
 test colorParser "green" // Success: "green"
 test colorParser "blue" // Success: "blue"
 test colorParser "yellow" // Success: "yellow"
 test colorParser "orange" // Success: "orange"
 test colorParser "black" // Success: "black"
-test colorParser "#123456" // Success: "#123456"
-test colorParser "#123" // Success: "#123"
+test colorParser "#123de6" // Success: "#123456"
+test colorParser "#1a3" // Success: "#123"
+test colorParser "#1z3" // Failure: Error in Ln: 1 Col: 3
+test colorParser "#1f34" // Failure: Error in Ln: 1 Col: 6
+test colorParser "#12d45" // Failure: Error in Ln: 1 Col: 7
+test colorParser "#1234567" // Failure: Error in Ln: 1 Col: 9
+test colorParser "#123dez" // Failure: Error in Ln: 1 Col: 7

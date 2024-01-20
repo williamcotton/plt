@@ -1,0 +1,765 @@
+#!/usr/bin/env python
+
+# # plt - a command line tool for plotting data
+#
+# ## example usage
+#
+# ```shell
+# $ cat data.csv | plt "insertions, date { plot 1px solid red }" | imgcat --width=100
+# $ cat data.csv | plt "deletions, date { bar 20px solid green }" | imgcat --width=100
+# $ cat data.csv | plt "[insertions, deletions], date { stackbar 20px [solid orange, solid blue]}" > chart.png
+#
+# $ plt "insertions, date { plot 5px solid red } deletions, date { bar 20px solid #DDFF21 }" < data.csv > combined.png
+#
+# $ plt "insertions, date { plot 5px solid red } deletions, date { bar 20px solid #D3F }" --py > combined.py
+# $ cat data.csv | python3 combined.py > combined.png
+# ```
+#
+# ## grammar
+#
+# ```ebnf
+# program = command*;
+# command = fields "{" action "}";
+# fields = FIELDNAME "," FIELDNAME* | "[" FIELDNAME "," FIELDNAME* "]" "," FIELDNAME;
+# action = "plot" style | "bar" style | "stackbar" multi_style;
+# style = WIDTH DRAW_STYLE COLOR;
+# multi_style = WIDTH "[" DRAW_STYLE COLOR "," DRAW_STYLE COLOR "]";
+# FIELDNAME = [a-zA-Z0-9_]+;
+# WIDTH = [0-9]+ "px";
+# DRAW_STYLE = "solid" | "dashed" | "dotted";
+# COLOR = "red" | "green" | "blue" | "orange" | "black" | "yellow" | "#" [0-9a-fA-F]{6} | "#" [0-9a-fA-F]{3};
+# ```
+
+import os
+import tempfile
+import subprocess
+import sys
+import re
+from ply import lex, yacc
+import argparse
+import pprint
+import sourcetypes
+from jinja2 import Environment, DictLoader
+from collections import OrderedDict
+from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
+import importlib.util
+
+#
+# COMMAND LINE INTERFACE
+#
+
+# Define the parser for the plt language
+plt_parser = argparse.ArgumentParser(add_help=False)
+plt_parser.add_argument("plt", nargs="?", type=str, help="The plt language string")
+
+# Parse the command line arguments
+parser = argparse.ArgumentParser(parents=[plt_parser])
+parser.add_argument(
+    "--py", action="store_true", help="Print the generated Python code and exit"
+)
+parser.add_argument("--debug", action="store_true", help="Print commands and exit")
+args = parser.parse_args()
+
+#
+# ERROR PRINTING
+#
+
+error_image = Image.new("RGBA", (1000, 40), (0, 0, 0, 0))
+draw = ImageDraw.Draw(error_image)
+draw.line((0, 20, 1000, 20), fill="red", width=1)
+error_image_buffer = BytesIO()
+error_image.save(error_image_buffer, format="PNG")
+
+
+def underline_error(code, token_value, token_pos):
+    # Search for the token in the code
+    match = re.search(re.escape(token_value), code[token_pos:])
+    if match:
+        start_index = token_pos + match.start()
+        end_index = token_pos + match.end()
+
+        # Split the code into lines
+        lines = code.split("\n")
+
+        # Find the line number of the token
+        line_number = 1
+        for i, line in enumerate(lines):
+            if start_index >= len(line):
+                start_index -= len(line) + 1
+                end_index -= len(line) + 1
+                line_number += 1
+            else:
+                break
+
+        # Underline the token in red
+        line = lines[line_number - 1]
+        underline = (
+            line[:start_index]
+            + "\033[91m"  # red
+            + "\033[4m"  # underline
+            + token_value
+            + "\033[0m"  # reset
+            + "\033[0m"  # reset
+            + line[end_index:]
+        )
+        lines[line_number - 1] = underline
+
+        # Print the code with the underlined token and the entire line
+        return "\n".join(lines) + "\n"
+    else:
+        return "Error: could not find token '{}' in code".format(token_value)
+
+
+## error.py ###################################################################
+error_str: sourcetypes.python = """#!/usr/bin/env python3
+
+import sys
+from PIL import Image, ImageDraw
+from io import BytesIO
+
+error_image = Image.new("RGBA", (1000, 40), (0, 0, 0, 0))
+draw = ImageDraw.Draw(error_image)
+draw.line((0, 20, 1000, 20), fill="red", width=1)
+error_image_buffer = BytesIO()
+error_image.save(error_image_buffer, format="PNG")
+sys.stdout.buffer.write(error_image_buffer.getvalue())
+sys.exit(1)
+"""
+
+
+def error_message_and_exit(code, value, message, lexer_start):
+    sys.stderr.write(underline_error(code, value, lexer_start))
+    sys.stderr.write("\n")
+    sys.stderr.write(message)
+    sys.stderr.write("\n\n")
+    if args.py:
+        print(error_str)
+    else:
+        sys.stdout.buffer.write(error_image_buffer.getvalue())
+    exit(1)
+
+
+#
+# INTERMEDIARY DATA STRUCTURES
+#
+
+# Matplotlib commands
+matplotlib_commands = []
+
+# Legend names
+legend_names = []
+
+# All field names
+field_names = []
+
+#
+# PLUGINS
+#
+
+# Define the directory paths for the plugin templates
+template_dirs = [
+    os.path.expanduser("~/dotfiles/plt/"),
+    os.path.expanduser("~/plt/"),
+]
+
+plugins = {}
+
+# Iterate over the files in the template directories
+for template_dir in template_dirs:
+    # Check if the directory exists
+    if os.path.isdir(template_dir):
+        for filename in os.listdir(template_dir):
+            # Check if the file ends with "_template.py"
+            if filename.endswith("_template.py"):
+                # Extract the plugin name from the file name
+                plugin_name = filename[: -len("_template.py")]
+                # Load the plugin module dynamically
+                spec = importlib.util.spec_from_file_location(
+                    plugin_name, os.path.join(template_dir, filename)
+                )
+                plugin_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(plugin_module)
+                # Check if the plugin module has a "parser" attribute
+                plugins[plugin_name] = (
+                    {
+                        "parser": plugin_module.parser,
+                        "template": plugin_module.template_str,
+                    }
+                    if hasattr(plugin_module, "parser")
+                    else {
+                        "template": plugin_module.template_str,
+                    }
+                )
+
+#
+# LANGUAGE DEFINITION
+#
+
+color_names = ["red", "green", "blue", "orange", "yellow", "black"]
+draw_styles = ["solid", "dashed", "dotted"]
+
+# Define the reserved words
+plot_reserved = {
+    "highlight": "HIGHLIGHT",
+}
+
+reserved = plot_reserved.copy()
+
+reserved.update({color: "COLOR" for color in color_names})
+reserved.update({draw_style: "DRAW_STYLE" for draw_style in draw_styles})
+
+# Define the lexer tokens
+tokens = (
+    "FIELDNAME",
+    "PLOTNAME",
+    "WIDTH",
+    "INTEGER",
+    "STRING",
+    "LBRACKET",
+    "RBRACKET",
+    "LBRACE",
+    "RBRACE",
+) + tuple(set(reserved.values()))
+
+# Define the lexer rules
+draw_styles_regex = "|".join(draw_styles)
+t_DRAW_STYLE = f"({draw_styles_regex})"
+
+color_names_regex = "|".join(color_names)
+hex_color_regex = r"\#\w{6}|\#\w{3}"
+t_COLOR = f"({color_names_regex}|{hex_color_regex})"
+
+
+t_WIDTH = r"\d+px"
+
+t_INTEGER = r"\d+"
+
+
+def t_FIELDNAME(t):
+    r"[a-zA-Z_][a-zA-Z0-9_\/]*"  # field names must start with a letter or underscore
+    if t.lexer.start_fields != True or t.lexer.fields_processed == True:
+        t.type = reserved.get(t.value, "FIELDNAME")  # Check for reserved words
+    if t.lexer.start_action == True:
+        t.type = reserved.get(t.value, "PLOTNAME")  # Check for reserved words
+    return t
+
+
+def t_PLOTNAME(t):
+    r"[a-zA-Z_][a-zA-Z0-9_\-\/]*"  # plot names must start with a letter or underscore
+    return t
+
+
+t_ignore = " \t\n"  # ignore whitespace and newlines
+
+
+def t_error(t):
+    print("Unknown token:", t.value)
+    t.lexer.skip(1)
+
+
+def t_LBRACKET(t):
+    r"\["
+    t.lexer.start_fields = True
+    if t.lexer.fields_processed == True:
+        t.lexer.start_fields = False
+    return t
+
+
+def t_RBRACKET(t):
+    r"\]"
+    t.lexer.start_fields = False
+    t.lexer.fields_processed = True
+    return t
+
+
+def t_LBRACE(t):
+    r"\{"
+    t.lexer.start_action = True
+    return t
+
+
+def t_RBRACE(t):
+    r"\}"
+    t.lexer.start_action = False
+    return t
+
+
+literals = [","]
+
+
+# Define the parser lambdas for "highlight" and "base"
+def highlight_parser(p):
+    return {"start": int(p[2]), "end": int(p[3])}
+
+
+def base_parser(p):
+    return {"width": int(p[2][:-2])}
+
+
+# Define the templates dictionary based on the jinja_templates dictionary
+parsers = {
+    "base": {"parser": base_parser},
+    "plot": {"parser": base_parser},
+    "bar": {"parser": base_parser},
+    "multi_bar": {"parser": base_parser},
+    "multi_stackbar": {"parser": base_parser},
+    "highlight": {"parser": highlight_parser},
+}
+
+original_parsers = parsers.copy()
+
+# Add the base_parser to any plugins that don't have a parser defined
+for plugin_name, plugin_data in plugins.items():
+    if "parser" not in plugin_data:
+        plugin_data["parser"] = base_parser
+
+parsers.update(plugins)
+
+
+# Define the parser rules
+def p_program(p):
+    """program : command
+    | program command"""
+    pass
+
+
+command = {}
+
+
+def p_command(p):
+    """command : fields LBRACE action RBRACE"""
+    process_command_plot_style_title(command)
+    process_command_fields(command)
+    process_command_attributes(command)
+    matplotlib_commands.append(command.copy())
+    command.clear()
+    p.lexer.start_fields = False
+    p.lexer.fields_processed = False
+    p.lexer.start_action = False
+    pass
+
+
+def process_command_attributes(command):
+    if "attributes" in command:
+        command.update(
+            parsers[command["plot_style"]]["parser"]([0] + command["attributes"])
+        )
+    pass
+
+
+def process_command_plot_style_title(command):
+    command["plot_style_title"] = (
+        command["plot_style"].replace("_", " ").replace("-", " ").title()
+    )
+
+
+def process_command_fields(command):
+    if "y_fieldnames" in command:
+        command[
+            "fields_title"
+        ] = f"[{command['y_fieldnames']}, {command['x_fieldname']}]"
+        legend_names.extend(
+            [
+                field.replace("_", " ").replace("-", " ").title()
+                for field in command["y_fieldnames"]
+            ]
+        )
+        field_names.extend(command["y_fieldnames"])
+        del command["y_fieldname"]
+    else:
+        command[
+            "fields_title"
+        ] = f"[{command['y_fieldname']}, {command['x_fieldname']}]"
+        legend_names.append(
+            command["y_fieldname"].replace("_", " ").replace("-", " ").title()
+        )
+        if command["plot_style"] != "highlight":
+            field_names.append(command["y_fieldname"])
+    field_names.append(command["x_fieldname"])
+
+
+def p_fields(p):
+    """fields : FIELDNAME ',' FIELDNAME
+    | fields ',' FIELDNAME
+    | LBRACKET fields RBRACKET ',' FIELDNAME"""
+    if p[1] == "[":
+        command.update({"multi": True, "y_fieldnames": p[2], "x_fieldname": p[5]})
+    else:
+        if isinstance(p[1], list):
+            command.update({"y_fieldnames": p[1], "x_fieldname": p[3]})
+        else:
+            command.update({"y_fieldname": p[1], "x_fieldname": p[3]})
+    if not isinstance(p[1], list):
+        p[0] = [p[1], p[3]]
+    else:
+        p[0] = p[1] + [p[3]]
+    pass
+
+
+def p_fields_error(p):
+    """fields : LBRACKET fields ',' FIELDNAME
+    | fields RBRACKET ',' FIELDNAME"""
+    code = p.lexer.lexdata
+    if p[1] == "[":
+        message = "Missing ']'"
+        value = "["
+    else:
+        message = "Missing '['"
+        value = "]"
+    error_message_and_exit(code, value, message, code.rfind(value, 0, p.lexer.lexpos))
+
+
+def p_action(p):
+    """action : PLOTNAME WIDTH LBRACKET multi_style RBRACKET
+    | HIGHLIGHT INTEGER INTEGER style
+    | PLOTNAME WIDTH style
+    | PLOTNAME arguments"""
+    command.update({"plot_style": p[1]})
+    if "attributes" in command:
+        if p[1] not in parsers:
+            error_message_and_exit(
+                p.lexer.lexdata,
+                p[1],
+                f"Unknown plot style '{p[1]}'",
+                p.lexer.lexdata.rfind(p[1], 0, p.lexer.lexpos),
+            )
+        template_name = p[1] + "_template.py"
+        command.update({"template_name": template_name, "attributes": p[2]})
+        # if command plot_style is in parsers and commands has 'attributes' key then error
+        if "attributes" in command and p[1] in original_parsers:
+            error_message_and_exit(
+                p.lexer.lexdata,
+                p[2][-1],
+                f"Plot style '{p[1]}' does not accept attributes",
+                p.lexer.lexdata.rfind(p[1], 0, p.lexer.lexpos),
+            )
+        command.update(parsers[p[1]]["parser"]([0] + command["attributes"]))
+    else:
+        plot_template_prefix = "multi_" + p[1] if p[3] == "[" else p[1]
+        if plot_template_prefix not in parsers:
+            error_message_and_exit(
+                p.lexer.lexdata,
+                p[1],
+                f"Unknown plot style '{p[1]}'",
+                p.lexer.lexdata.rfind(p[1], 0, p.lexer.lexpos),
+            )
+        template_name = plot_template_prefix + "_template.py"
+        command.update({"template_name": template_name})
+        command.update(parsers[plot_template_prefix]["parser"](p))
+    pass
+
+
+# arguments should be any number of any type of arguments separated by spaces
+def p_arguments(p):
+    """arguments : arguments argument
+    | argument"""
+    if len(p) == 2:
+        command.update({"attributes": [p[1]]})
+        p[0] = [p[1]]
+    else:
+        command["attributes"].append(p[2])
+        p[0] = p[1] + [p[2]]
+    pass
+
+
+def p_argument(p):
+    """argument : WIDTH
+    | DRAW_STYLE
+    | COLOR
+    | PLOTNAME
+    | INTEGER"""
+    if p[1].endswith("px"):
+        p[0] = int(p[1][:-2])
+    else:
+        p[0] = p[1]
+    pass
+
+
+def p_style(p):
+    """style : DRAW_STYLE COLOR"""
+    command.update({"draw_style": p[1], "color": p[2]})
+    pass
+
+
+def p_multi_style(p):
+    """multi_style : DRAW_STYLE COLOR ',' DRAW_STYLE COLOR
+    | multi_style ',' DRAW_STYLE COLOR"""
+    if len(p) == 5:
+        p[1] += [{"draw_style": p[3], "color": p[4]}]
+        command.update({"styles": p[1]})
+    if len(p) == 6:
+        command.update(
+            {
+                "styles": [
+                    {"draw_style": p[1], "color": p[2]},
+                    {"draw_style": p[4], "color": p[5]},
+                ]
+            }
+        )
+    if not isinstance(p[1], list):
+        p[0] = [
+            {"draw_style": p[1], "color": p[2]},
+            {"draw_style": p[4], "color": p[5]},
+        ]
+    else:
+        p[0] = p[1] + [{"draw_style": p[3], "color": p[4]}]
+
+    pass
+
+
+def p_error(p):
+    error_message_and_exit(
+        args.plt, p.value, f"Unknown token '{p.value} {str(p)}'", p.lexpos
+    )
+
+
+# Build the lexer and parser
+lexer = lex.lex()
+parser = yacc.yacc()
+
+#
+# PARSE FOR INTERMEDIARY DATA
+#
+
+# Check if the plt language string is provided
+if args.plt:
+    # Reset the lexer
+    lexer.start_fields = False
+    lexer.start_action = False
+    lexer.fields_processed = False
+    # Parse the plt language string using the lexer and parser
+    parser = yacc.yacc()
+    # A single pass compiler builds the matplotlib commands as we parse the plt language string
+    parser.parse(args.plt)
+    # Make unique legend names
+    legend_names = list(OrderedDict.fromkeys(legend_names))
+
+#
+# DEBUGGING
+#
+
+# Print the commands and exit if the --debug flag is used
+if args.debug:
+    print("\n\033[4mTokens\033[0m\n")
+    lexer.input(args.plt)
+    for tok in lexer:
+        print(tok)
+    print("\n\033[4mCommands\033[0m\n")
+    for command in matplotlib_commands:
+        pprint.pprint(command)
+        print()
+    sys.exit()
+
+#
+# PYTHON CODE GENERATION
+#
+
+## template.py ################################################################
+base_template_str: sourcetypes.python = """#!/usr/bin/env python3
+
+import csv
+import sys
+import io
+import re
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import matplotlib.transforms as transforms
+import numpy as np
+from PIL import Image, ImageDraw
+from io import BytesIO
+
+# Read CSV or TSV from STDIN
+input_file = io.StringIO(sys.stdin.read())
+first_line = input_file.readline()
+input_file.seek(0)
+
+if '\\t' in first_line:
+    # The input data is tab-delimited
+    reader = csv.DictReader(input_file, delimiter='\\t')
+else:
+    # The input data is comma-delimited
+    reader = csv.DictReader(input_file)
+
+# Check if the plot fieldnames are in the CSV or TSV
+plot_fieldnames = {{ field_names }}
+missing_fieldnames = []
+for fieldname in plot_fieldnames:
+    if fieldname not in reader.fieldnames:
+        missing_fieldnames.append(fieldname)
+
+# Print an error message and exit if the plot fieldnames are not in the CSV or TSV
+if len(missing_fieldnames) > 0:
+    print(f'\\nError: the following fieldnames are not in the CSV or TSV: \033[91m\033[4m{missing_fieldnames}\033[0m\033[0m\\n', file=sys.stderr)
+    error_image = Image.new("RGBA", (1000, 40), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(error_image)
+    draw.line((0, 20, 1000, 20), fill="red", width=1)
+    error_image_buffer = BytesIO()
+    error_image.save(error_image_buffer, format="PNG")
+    sys.stdout.buffer.write(error_image_buffer.getvalue())
+    sys.exit(1)
+
+data = {k: [] for k in reader.fieldnames}
+for row in reader:
+    for k, v in row.items():
+        data[k].append(v)
+
+# Generate the plot
+fig, ax = plt.subplots(figsize=(8, 5))
+
+{%- for command in matplotlib_commands %}
+
+### {{ command['plot_style_title'] }}: {{ command['fields_title'] }}
+x_value = data['{{ command['x_fieldname'] }}']
+x = np.arange(len(x_value))
+ax.set_xticks(x, x_value)
+{%- include command['template_name'] %}
+{%- endfor %}
+
+# Update the legend names and labels
+ax.legend({{legend_names}})
+
+# Set the x-axis labels
+ax.set_xlabel('{{ matplotlib_commands[0]['x_fieldname'].replace('_', ' ').replace('-', ' ').title() }}')
+plt.xticks(rotation=90)
+if len(x_value) > 40:
+    plt.xticks(np.arange(0, len(x_value), 12))
+
+if len(x_value) > 100:
+    plt.xticks(np.arange(0, len(x_value), 100))    
+
+# Set the y-axis label
+ax.set_ylabel('Count')
+
+# Add space for the x-axis labels
+fig.subplots_adjust(bottom=0.2)
+# Save the plot to stdout as a PNG image
+plt.savefig(sys.stdout.buffer, format='png')
+"""
+
+### plot_template.py ##########################################################
+plot_template_str: sourcetypes.python = """
+y_{{ command['y_fieldname'] }}_value = [float(y) for y in data['{{ command['y_fieldname'] }}']]
+width = 0.02
+ax.plot(x_value, y_{{ command['y_fieldname'] }}_value, color='{{ command['color'] }}', linestyle='{{ command['draw_style'] }}', linewidth={{ command['width'] }})
+"""
+
+### bar_template.py ###########################################################
+bar_template_str: sourcetypes.python = """
+y_{{ command['y_fieldname'] }}_value = [float(y) for y in data['{{ command['y_fieldname'] }}']]
+draw_style = '{{ command['draw_style'] }}'
+if draw_style == 'solid':
+    hatch = ''
+if draw_style == 'dashed':
+    hatch = '/'
+if draw_style == 'dotted':
+    hatch = 'o'
+ax.bar(x_value, y_{{ command['y_fieldname'] }}_value, hatch=hatch, color='{{ command['color'] }}', width={{ command['width'] / 50 }}, alpha=0.5)
+"""
+
+## multi_bar_template.py ######################################################
+multi_bar_template_str: sourcetypes.python = """
+y_values = [np.array([float(y) for y in data[field]]) for field in {{ command['y_fieldnames'] }}]
+styles = {{ command['styles'] }}
+width = {{ command['width'] / 50 }}
+ax.set_xticks(x + width, x_value)
+multiplier = 0
+for index, field in enumerate({{ command['y_fieldnames'] }}):
+    offset = width * multiplier
+    if styles[index]['draw_style'] == 'solid':
+        hatch = ''
+    if styles[index]['draw_style'] == 'dashed':
+        hatch = '/'
+    if styles[index]['draw_style'] == 'dotted':
+        hatch = 'o'
+    rects = ax.bar(x + offset, y_values[index], width, hatch=hatch, color=styles[index]['color'], linewidth=1)
+    multiplier += 1
+"""
+
+## multi_stackbar_template.py #################################################
+multi_stackbar_template_str: sourcetypes.python = """
+y_values = [np.array([float(y) for y in data[field]]) for field in {{ command['y_fieldnames'] }}]
+styles = {{ command['styles'] }}
+width = {{ command['width'] / 50 }}
+bottom = np.zeros(3)
+for index, field in enumerate({{ command['y_fieldnames'] }}):
+    if styles[index]['draw_style'] == 'solid':
+        hatch = ''
+    if styles[index]['draw_style'] == 'dashed':
+        hatch = '/'
+    if styles[index]['draw_style'] == 'dotted':
+        hatch = 'o'
+    rects = ax.bar(x_value, y_values[index], width, hatch=hatch, color=styles[index]['color'], bottom=bottom)
+    bottom += y_values[index]
+"""
+
+## highlight_template.py ######################################################
+highlight_template_str: sourcetypes.python = """
+trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+rect = mpatches.Rectangle(({{ command['start'] }}, 0), width={{ command['end'] - command['start'] }}, height=1, transform=trans, color='{{ command['color'] }}', alpha=0.5)
+ax.add_patch(rect)
+"""
+
+# Define the templates dictionary based on the jinja_templates dictionary
+templates = {
+    "base": {"template": base_template_str},
+    "plot": {"template": plot_template_str},
+    "bar": {"template": bar_template_str},
+    "multi_bar": {"template": multi_bar_template_str},
+    "multi_stackbar": {"template": multi_stackbar_template_str},
+    "highlight": {"template": highlight_template_str},
+}
+
+templates.update(plugins)
+
+# Convert the templates dictionary to the jinja_templates structure
+jinja_templates = {}
+for name, template in templates.items():
+    jinja_templates[name + "_template.py"] = template["template"]
+
+
+# Create a Jinja environment with the DictLoader
+env = Environment(loader=DictLoader(jinja_templates))
+
+# Render the template with the data
+output = env.get_template("base_template.py").render(
+    matplotlib_commands=matplotlib_commands,
+    legend_names=legend_names,
+    field_names=field_names,
+)
+
+#
+# PRINT PYTHON CODE WITH TEXT OUTPUT
+#
+
+# Print the generated Python code and exit if the --py flag is used
+if args.py:
+    print(output)
+    sys.exit()
+
+#
+# EXECUTE PYTHON CODE WITH PNG OUTPUT
+#
+
+# Save the plot to a temporary file
+with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+    f.write(output)
+    temp_file = f.name
+
+# Execute the temporary file using subprocess.run()
+try:
+    result = subprocess.run(
+        [sys.executable, temp_file],
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+except Exception as e:
+    error_message = e.stderr.decode().strip()
+    print(error_message, file=sys.stderr)
+    sys.stdout.buffer.write(error_image_buffer.getvalue())
+    sys.exit(1)
+
+# Delete the temporary file
+os.unlink(temp_file)

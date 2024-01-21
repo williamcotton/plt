@@ -115,7 +115,7 @@ test drawStyleParser "dotted" // Success: "dotted"
 test drawStyleParser "sdfsdf" // Failure: Error in Ln: 1 Col: 6
 
 let styleParser =
-    pipe3 (widthParser .>> spaces) (drawStyleParser .>> spaces) colorParser (fun width style color -> (width, style, color))
+    pipe3 (widthParser .>> spaces) (drawStyleParser .>> spaces) colorParser (fun width style color -> (width, [(style, color)]))
 
 test styleParser "100px solid #123456" // Success: ("100px", "solid", "#123456")
 test styleParser "50px dashed red" // Success: ("50px", "dashed", "red")
@@ -124,9 +124,10 @@ test styleParser "10px sdfsdf #123456" // Failure: Error in Ln: 1 Col: 6
 test styleParser "sdf sdfsdf #123456" // Failure: Error in Ln: 1 Col: 1
 test styleParser "10px dotted #1234" // Failure: Error in Ln: 1 Col: 18
 
+// multi_style
+
 let styleColorPairParser =
     pipe2 (drawStyleParser .>> spaces) colorParser (fun style color -> (style, color))
-
 let multiStyleParser =
     pipe2 
         (widthParser .>> spaces) 
@@ -141,3 +142,40 @@ test multiStyleParser "20px [solid #123, dashed #abc, dotted yellow]" // Success
 test multiStyleParser "100px [solid #123456]" // Success: ("100px", [("solid", "#123456")])
 test multiStyleParser "100px solid #123456, dotted]" // Failure: Error in Ln: 1 Col: 21
 
+// action
+
+let plotParser = 
+    pstring "plot" >>. spaces >>. styleParser |>> fun (width, [(style, color)]) -> 
+    ("plot", width, [(style, color)])
+
+let barParser = 
+    pstring "bar" >>. spaces >>. styleParser |>> fun (width, [(style, color)]) -> 
+    ("bar", width, [(style, color)])
+
+let stackbarParser = 
+    pstring "stackbar" >>. spaces >>. multiStyleParser |>> fun (width, styleColorPairs) -> 
+    ("stackbar", width, styleColorPairs)
+
+let notNewline = satisfy (fun c -> c <> '\n' && c <> '\r')
+let graphicNameParser = manyChars notNewline
+
+let genericGraphicParser = 
+    graphicNameParser >>= fun name ->
+    spaces >>. choice [styleParser; multiStyleParser] >>= fun result ->
+    match result with
+    | (width, [(style, color)]) -> preturn (name, width, [(style, color)])
+    | (width, styleColorPairs) -> preturn (name, width, styleColorPairs)
+    
+let actionParser =
+    choice [
+        plotParser; 
+        barParser; 
+        stackbarParser;
+        genericGraphicParser;
+    ]
+
+test actionParser "plot 100px solid #123456" // Success: ("plot", "100px", [("solid", "#123456")])
+test actionParser "bar 100px solid #123456" // Success: ("bar", "100px", [("solid", "#123456")])
+test actionParser "stackbar 100px [solid #123456, dotted #ff0000, dashed green]" // Success: ("stackbar", "100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
+test actionParser "plot 100px solid #123456, dotted #ff0000, dashed green" // Success: ("plot", "100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
+test actionParser "plugin 100px solid #123456" // Success: ("plugin", "100px", [("solid", "#123456")])

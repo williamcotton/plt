@@ -19,21 +19,7 @@
 
 open FParsec
 
-// Define the color parser
-let hexadecimalDigit = satisfy (fun c -> isDigit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
-
-let hexColor =
-    pstring "#" >>. manyChars hexadecimalDigit >>= fun hexDigits ->
-    match hexDigits.Length with
-    | 3 | 6 -> preturn ("#" + hexDigits)
-    | _ -> fail "Invalid hex color"
-
-let colorParser =
-    choice [
-        pstring "red"; pstring "green"; pstring "blue"; pstring "yellow"; pstring "orange"; pstring "black";
-        hexColor
-    ]
-
+// fields
 let stringContent = many1Chars (noneOf ",[] \t\r\n")
 let stringParser = spaces >>. stringContent .>> spaces
 let commaSeparatedStrings = sepBy stringParser (pstring ",")
@@ -45,7 +31,6 @@ let stringOrCommaSeparatedStringsBetweenBrackets =
         commaSeparatedStringsBetweenBrackets
     ]
 
-// Define yOverX parser to capture both ys and x
 let yOverX =
     spaces >>. pipe2 stringOrCommaSeparatedStringsBetweenBrackets (pstring "," >>. stringParser) (fun ys x -> (ys, x)) .>> spaces .>> eof
 
@@ -60,6 +45,8 @@ test stringContent "abc" // Success: "abc"
 test stringParser "  abc  " // Success: "abc"
 test commaSeparatedStrings "   a,   b,     c " // Success: ["a"; "b"; "c"]
 test commaSeparatedStringsBetweenBrackets "[a, b, c]" // Success: ["a"; "b"; "c"]
+test commaSeparatedStringsBetweenBrackets "[a, b, c" // Failure: Error in Ln: 1 Col: 9
+test commaSeparatedStringsBetweenBrackets "a, b, c]" // Failure: Error in Ln: 1 Col: 1
 test commaSeparatedStringsBetweenBrackets "[  
      a   , b   ,  
       c  
@@ -76,7 +63,31 @@ test yOverX "   [
 x" // Success: (["y1"; "y2"], "x")
 test yOverX "y x" // Failure: Error in Ln: 1 Col: 3
 test yOverX "[y1, y2] x" // Failure: Error in Ln: 1 Col: 10
-test yOverX "[y1, y2], x, z" // Failure: Error in Ln: 1 Col: 13
+test yOverX "[y1, y2], x, z" // Failure: Error in Ln: 1 Col: 12
+
+// color
+let hexadecimalDigit = satisfy (fun c -> isDigit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
+let hexColor =
+    pstring "#" >>. manyChars hexadecimalDigit >>= fun hexDigits ->
+    match hexDigits.Length with
+    | 3 | 6 -> preturn ("#" + hexDigits)
+    | _ -> fail "Invalid hex color"
+let colorParser =
+    choice [
+        pstring "red"; pstring "green"; pstring "blue"; pstring "yellow"; pstring "orange"; pstring "black";
+        hexColor
+    ]
+
+// width
+let widthParser = many1Chars digit .>> pstring "px" |>> (fun digits -> digits + "px")
+
+// draw style
+let drawStyleParser =
+    choice [
+        pstring "solid"; 
+        pstring "dashed"; 
+        pstring "dotted"
+    ]
 
 test colorParser "red" // Success: "red"
 test colorParser "green" // Success: "green"
@@ -84,10 +95,48 @@ test colorParser "blue" // Success: "blue"
 test colorParser "yellow" // Success: "yellow"
 test colorParser "orange" // Success: "orange"
 test colorParser "black" // Success: "black"
-test colorParser "#123de6" // Success: "#123456"
+test colorParser "#123de6" // Success: "#123de6"
 test colorParser "#1a3" // Success: "#123"
 test colorParser "#1z3" // Failure: Error in Ln: 1 Col: 3
 test colorParser "#1f34" // Failure: Error in Ln: 1 Col: 6
 test colorParser "#12d45" // Failure: Error in Ln: 1 Col: 7
 test colorParser "#1234567" // Failure: Error in Ln: 1 Col: 9
-test colorParser "#123dez" // Failure: Error in Ln: 1 Col: 7
+test colorParser "#123dez" // Failure: Error in Ln: 1 Col: 
+
+test widthParser "1px" // Success: "1px"
+test widthParser "10px" // Success: "10px"
+test widthParser "100px" // Success: "100px"
+test widthParser "1000px" // Success: "1000px"
+test widthParser "sdf" // Failure: Error in Ln: 1 Col: 1
+
+test drawStyleParser "solid" // Success: "solid"
+test drawStyleParser "dashed" // Success: "dashed"
+test drawStyleParser "dotted" // Success: "dotted"
+test drawStyleParser "sdfsdf" // Failure: Error in Ln: 1 Col: 6
+
+let styleParser =
+    pipe3 (widthParser .>> spaces) (drawStyleParser .>> spaces) colorParser (fun width style color -> (width, style, color))
+
+test styleParser "100px solid #123456" // Success: ("100px", "solid", "#123456")
+test styleParser "50px dashed red" // Success: ("50px", "dashed", "red")
+test styleParser "10px dotted #123" // Success: ("10px", "dotted", "#123")
+test styleParser "10px sdfsdf #123456" // Failure: Error in Ln: 1 Col: 6
+test styleParser "sdf sdfsdf #123456" // Failure: Error in Ln: 1 Col: 1
+test styleParser "10px dotted #1234" // Failure: Error in Ln: 1 Col: 18
+
+let styleColorPairParser =
+    pipe2 (drawStyleParser .>> spaces) colorParser (fun style color -> (style, color))
+
+let multiStyleParser =
+    pipe2 
+        (widthParser .>> spaces) 
+        (between (pchar '[') (pchar ']') 
+            (sepBy styleColorPairParser (pstring ", " .>> spaces))
+        )
+        (fun width styleColorPairs -> (width, styleColorPairs))
+
+test multiStyleParser "100px [solid #123456, dotted #ff0000, dashed green]" // Success: ("100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
+test multiStyleParser "50px [dashed blue]" // Success: ("50px", [("dashed", "blue")])
+test multiStyleParser "20px [solid #123, dashed #abc, dotted yellow]" // Success: ("20px", [("solid", "#123"); ("dashed", "#abc"); ("dotted", "yellow")])
+test multiStyleParser "100px [solid #123456]" // Success: ("100px", [("solid", "#123456")])
+test multiStyleParser "100px solid #123456, dotted]" // Failure: Error in Ln: 1 Col: 21

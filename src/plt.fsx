@@ -19,6 +19,13 @@
 
 open FParsec
 
+// test
+let test p str =
+    match run p str with
+    | Success(result, _, _) -> printfn "Success: %A" result
+    | Failure(errorMsg, _, _) -> printfn "Failure: %s" errorMsg
+
+
 // fields
 let stringContent = many1Chars (noneOf ",[] \t\r\n")
 let stringParser = spaces >>. stringContent .>> spaces
@@ -31,16 +38,9 @@ let stringOrCommaSeparatedStringsBetweenBrackets =
         commaSeparatedStringsBetweenBrackets
     ]
 
-let yOverX =
+let fieldsParser =
     spaces >>. pipe2 stringOrCommaSeparatedStringsBetweenBrackets (pstring "," >>. stringParser) (fun ys x -> (ys, x)) .>> spaces .>> eof
 
-// Test function
-let test p str =
-    match run p str with
-    | Success(result, _, _) -> printfn "Success: %A" result
-    | Failure(errorMsg, _, _) -> printfn "Failure: %s" errorMsg
-
-// Run tests
 test stringContent "abc" // Success: "abc"
 test stringParser "  abc  " // Success: "abc"
 test commaSeparatedStrings "   a,   b,     c " // Success: ["a"; "b"; "c"]
@@ -53,17 +53,17 @@ test commaSeparatedStringsBetweenBrackets "[
 ]" // Success: ["a"; "b"; "c"]
 test stringOrCommaSeparatedStringsBetweenBrackets "test" // Success: ["test"]
 test stringOrCommaSeparatedStringsBetweenBrackets "[test1, test2]" // Success: ["test1"; "test2"]
-test yOverX "y, x" // Success: (["y"], "x")
-test yOverX "[y1, y2], x" // Success: (["y1"; "y2"], "x")
-test yOverX "[y1,y2],x" // Success: (["y1"; "y2"], "x")
-test yOverX "   [y1, y2]  , x" // Success: (["y1"; "y2"], "x")
-test yOverX "   [  
+test fieldsParser "y, x" // Success: (["y"], "x")
+test fieldsParser "[y1, y2], x" // Success: (["y1"; "y2"], "x")
+test fieldsParser "[y1,y2],x" // Success: (["y1"; "y2"], "x")
+test fieldsParser "   [y1, y2]  , x" // Success: (["y1"; "y2"], "x")
+test fieldsParser "   [  
     y1
 ,    y2   ]  , 
 x" // Success: (["y1"; "y2"], "x")
-test yOverX "y x" // Failure: Error in Ln: 1 Col: 3
-test yOverX "[y1, y2] x" // Failure: Error in Ln: 1 Col: 10
-test yOverX "[y1, y2], x, z" // Failure: Error in Ln: 1 Col: 12
+test fieldsParser "y x" // Failure: Error in Ln: 1 Col: 3
+test fieldsParser "[y1, y2] x" // Failure: Error in Ln: 1 Col: 10
+test fieldsParser "[y1, y2], x, z" // Failure: Error in Ln: 1 Col: 12
 
 // color
 let hexadecimalDigit = satisfy (fun c -> isDigit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
@@ -76,17 +76,6 @@ let colorParser =
     choice [
         pstring "red"; pstring "green"; pstring "blue"; pstring "yellow"; pstring "orange"; pstring "black";
         hexColor
-    ]
-
-// width
-let widthParser = many1Chars digit .>> pstring "px" |>> (fun digits -> digits + "px")
-
-// draw style
-let drawStyleParser =
-    choice [
-        pstring "solid"; 
-        pstring "dashed"; 
-        pstring "dotted"
     ]
 
 test colorParser "red" // Success: "red"
@@ -103,11 +92,22 @@ test colorParser "#12d45" // Failure: Error in Ln: 1 Col: 7
 test colorParser "#1234567" // Failure: Error in Ln: 1 Col: 9
 test colorParser "#123dez" // Failure: Error in Ln: 1 Col: 
 
+// width
+let widthParser = many1Chars digit .>> pstring "px" |>> (fun digits -> digits + "px")
+
 test widthParser "1px" // Success: "1px"
 test widthParser "10px" // Success: "10px"
 test widthParser "100px" // Success: "100px"
 test widthParser "1000px" // Success: "1000px"
 test widthParser "sdf" // Failure: Error in Ln: 1 Col: 1
+
+// draw style
+let drawStyleParser =
+    choice [
+        pstring "solid"; 
+        pstring "dashed"; 
+        pstring "dotted"
+    ]
 
 test drawStyleParser "solid" // Success: "solid"
 test drawStyleParser "dashed" // Success: "dashed"
@@ -140,3 +140,4 @@ test multiStyleParser "50px [dashed blue]" // Success: ("50px", [("dashed", "blu
 test multiStyleParser "20px [solid #123, dashed #abc, dotted yellow]" // Success: ("20px", [("solid", "#123"); ("dashed", "#abc"); ("dotted", "yellow")])
 test multiStyleParser "100px [solid #123456]" // Success: ("100px", [("solid", "#123456")])
 test multiStyleParser "100px solid #123456, dotted]" // Failure: Error in Ln: 1 Col: 21
+

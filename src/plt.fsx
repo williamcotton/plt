@@ -25,6 +25,13 @@ let test p str =
     | Success(result, _, _) -> printfn "Success: %A" result
     | Failure(errorMsg, _, _) -> printfn "Failure: %s" errorMsg
 
+let (<!>) (p: Parser<_,_>) label : Parser<_,_> =
+    fun stream ->
+        printfn "%A: Entering %s" stream.Position label
+        let reply = p stream
+        printfn "%A: Leaving %s (%A)" stream.Position label reply.Status
+        reply
+
 // common    
 let notNewline = satisfy (fun c -> c <> '\n' && c <> '\r')
 
@@ -41,7 +48,7 @@ let stringOrCommaSeparatedStringsBetweenBrackets =
     ]
 
 let fieldsParser =
-    spaces >>. pipe2 stringOrCommaSeparatedStringsBetweenBrackets (pstring "," >>. stringParser) (fun ys x -> (ys, x)) .>> spaces .>> eof
+    spaces >>. pipe2 stringOrCommaSeparatedStringsBetweenBrackets (pstring "," >>. stringParser) (fun ys x -> (ys, x)) .>> spaces
 
 test stringContent "abc" // Success: "abc"
 test stringParser "  abc  " // Success: "abc"
@@ -109,7 +116,7 @@ let drawStyleParser =
         pstring "solid"; 
         pstring "dashed"; 
         pstring "dotted"
-    ]
+    ] <!> "drawStyleParser"
 
 test drawStyleParser "solid" // Success: "solid"
 test drawStyleParser "dashed" // Success: "dashed"
@@ -117,11 +124,12 @@ test drawStyleParser "dotted" // Success: "dotted"
 test drawStyleParser "sdfsdf" // Failure: Error in Ln: 1 Col: 6
 
 let styleParser =
-    pipe3 (widthParser .>> spaces) (drawStyleParser .>> spaces) colorParser (fun width style color -> (width, [(style, color)]))
+    pipe3 (widthParser .>> spaces) (drawStyleParser .>> spaces) (colorParser .>> spaces) (fun width style color -> (width, [(style, color)])) <!> "styleParser"
 
 test styleParser "100px solid #123456" // Success: ("100px", "solid", "#123456")
 test styleParser "50px dashed red" // Success: ("50px", "dashed", "red")
 test styleParser "10px dotted #123" // Success: ("10px", "dotted", "#123")
+test styleParser "10px dotted #123    {" // Success: ("10px", "dotted", "#123")
 test styleParser "10px sdfsdf #123456" // Failure: Error in Ln: 1 Col: 6
 test styleParser "sdf sdfsdf #123456" // Failure: Error in Ln: 1 Col: 1
 test styleParser "10px dotted #1234" // Failure: Error in Ln: 1 Col: 18
@@ -137,6 +145,7 @@ let multiStyleParser =
             (sepBy styleColorPairParser (pstring ", " .>> spaces))
         )
         (fun width styleColorPairs -> (width, styleColorPairs))
+    <!> "multiStyleParser"
 
 test multiStyleParser "100px [solid #123456, dotted #ff0000, dashed green]" // Success: ("100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
 test multiStyleParser "50px [dashed blue]" // Success: ("50px", [("dashed", "blue")])
@@ -147,32 +156,41 @@ test multiStyleParser "100px solid #123456, dotted]" // Failure: Error in Ln: 1 
 // action
 
 let plotParser = 
-    pstring "plot" >>. spaces >>. styleParser |>> fun (width, [(style, color)]) -> 
-    ("plot", width, [(style, color)])
+    pstring "plot" >>. spaces >>. styleParser |>> fun (width, styleColorPairs) -> 
+    ("plot", width, styleColorPairs)
 let barParser = 
-    pstring "bar" >>. spaces >>. styleParser |>> fun (width, [(style, color)]) -> 
-    ("bar", width, [(style, color)])
+    pstring "bar" >>. spaces >>. styleParser |>> fun (width, styleColorPairs) -> 
+    ("bar", width, styleColorPairs)
 let stackbarParser = 
     pstring "stackbar" >>. spaces >>. multiStyleParser |>> fun (width, styleColorPairs) -> 
     ("stackbar", width, styleColorPairs)
 
-
-
 let graphicNameParser = manyChars notNewline
-let genericGraphicParser = 
+let genericGraphicParser =
     graphicNameParser >>= fun name ->
     spaces >>. choice [styleParser; multiStyleParser] |>> fun (width, styleColorPairs) ->
     (name, width, styleColorPairs)
 let actionParser =
     choice [
-        plotParser; 
-        barParser;
-        stackbarParser;
-        genericGraphicParser;
-    ]
+        plotParser <!> "plotParser"; 
+        barParser <!> "barParser";
+        stackbarParser <!> "stackbarParser";
+        genericGraphicParser <!> "genericGraphicParser"
+    ] <!> "actionParser"
 
 test actionParser "plot 100px solid #123456" // Success: ("plot", "100px", [("solid", "#123456")])
 test actionParser "bar 100px solid #123456" // Success: ("bar", "100px", [("solid", "#123456")])
 test actionParser "stackbar 100px [solid #123456, dotted #ff0000, dashed green]" // Success: ("stackbar", "100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
 test actionParser "plot 100px solid #123456, dotted #ff0000, dashed green" // Success: ("plot", "100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
 test actionParser "plugin 100px solid #123456" // Success: ("plugin", "100px", [("solid", "#123456")])
+
+// command
+let commandParser =
+    pipe2 fieldsParser (between (pchar '{') (pchar '}') actionParser) (fun fields action -> (fields, action)) <!> "commandParser"
+
+test commandParser "y, x { plot 100px solid #123456 }" // Success: ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))
+
+// program
+let programParser = sepBy commandParser (many1 spaces) .>> eof
+
+test programParser "y, x { plot 100px solid #123456 } x, y { bar 10px solid red }" // Success: [((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))]

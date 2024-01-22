@@ -117,7 +117,7 @@ let drawStyleParser =
         pstring "solid"; 
         pstring "dashed"; 
         pstring "dotted"
-    ] <!> "drawStyleParser"
+    ]
 
 test drawStyleParser "solid" // Success: "solid"
 test drawStyleParser "dashed" // Success: "dashed"
@@ -125,7 +125,7 @@ test drawStyleParser "dotted" // Success: "dotted"
 test drawStyleParser "sdfsdf" // Failure: Error in Ln: 1 Col: 6
 
 let styleParser =
-    pipe3 (widthParser .>> spaces) (drawStyleParser .>> spaces) (colorParser .>> spaces) (fun width style color -> (width, [(style, color)])) <!> "styleParser"
+    pipe3 (widthParser .>> spaces) (drawStyleParser .>> spaces) (colorParser .>> spaces) (fun width style color -> (width, [(style, color)]))
 
 test styleParser "100px solid #123456" // Success: ("100px", "solid", "#123456")
 test styleParser "50px dashed red" // Success: ("50px", "dashed", "red")
@@ -146,7 +146,6 @@ let multiStyleParser =
             (sepBy styleColorPairParser (pstring "," .>> spaces))
         )
         (fun width styleColorPairs -> (width, styleColorPairs))
-    <!> "multiStyleParser"
 
 test multiStyleParser "100px [solid #123456, dotted #ff0000, dashed green]" // Success: ("100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
 test multiStyleParser "50px [dashed blue]" // Success: ("50px", [("dashed", "blue")])
@@ -170,24 +169,25 @@ let pluginParser = pipe2 (many1Chars (noneOf " \t\r\n") .>> spaces) (choice [att
 
 let actionParser =
     choice [
-        plotParser <!> "plotParser"; 
-        barParser <!> "barParser";
-        stackbarParser <!> "stackbarParser";
-        pluginParser <!> "pluginParser"
-    ] <!> "actionParser"
+        plotParser; 
+        barParser;
+        stackbarParser;
+        pluginParser;
+    ]
 
 test actionParser "plot 100px solid #123456" // Success: ("plot", "100px", [("solid", "#123456")])
 test actionParser "bar 100px solid #123456" // Success: ("bar", "100px", [("solid", "#123456")])
 test actionParser "stackbar 100px [solid #123456, dotted #ff0000, dashed green]" // Success: ("stackbar", "100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
 test actionParser "plot 100px solid #123456, dotted #ff0000, dashed green" // Success: ("plot", "100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
 test actionParser "plugin 100px solid #123456" // Should: ("plugin", "100px", [("solid", "#123456")])
+test actionParser "plotplug 100px solid #123456" // Should: ("plotplug", "100px", [("solid", "#123456")])
 
 // command
 let commandParser =
     pipe2 
         fieldsParser 
         (between (pchar '{' >>. spaces) (spaces >>. pchar '}') actionParser) 
-        (fun fields action -> (fields, action)) <!> "commandParser"
+        (fun fields action -> (fields, action))
 
 test commandParser "y, x { plot 100px solid #123456 }" // Success: ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))
 test commandParser "y,x{plot 100px solid #123456}" // Success: ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))

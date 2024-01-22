@@ -33,10 +33,10 @@ let (<!>) (p: Parser<_,_>) label : Parser<_,_> =
         reply
 
 // common    
-let notNewline = satisfy (fun c -> c <> '\n' && c <> '\r')
+// let notNewline = satisfy (fun c -> c <> '\n' && c <> '\r')
 
 // fields
-let stringContent = many1Chars (noneOf ",[] \t\r\n")
+let stringContent = many1Chars (noneOf ",[]{} \t\r\n")
 let stringParser = spaces >>. stringContent .>> spaces
 let commaSeparatedStrings = sepBy stringParser (pstring ",")
 let commaSeparatedStringsBetweenBrackets = between (spaces .>> pstring "[") (pstring "]" .>> spaces) (commaSeparatedStrings)
@@ -65,6 +65,7 @@ test stringOrCommaSeparatedStringsBetweenBrackets "[test1, test2]" // Success: [
 test fieldsParser "y, x" // Success: (["y"], "x")
 test fieldsParser "[y1, y2], x" // Success: (["y1"; "y2"], "x")
 test fieldsParser "[y1,y2],x" // Success: (["y1"; "y2"], "x")
+test fieldsParser "[y1,y2],x{}" // Success: (["y1"; "y2"], "x")
 test fieldsParser "   [y1, y2]  , x" // Success: (["y1"; "y2"], "x")
 test fieldsParser "   [  
     y1
@@ -142,7 +143,7 @@ let multiStyleParser =
     pipe2 
         (widthParser .>> spaces) 
         (between (pchar '[') (pchar ']') 
-            (sepBy styleColorPairParser (pstring ", " .>> spaces))
+            (sepBy styleColorPairParser (pstring "," .>> spaces))
         )
         (fun width styleColorPairs -> (width, styleColorPairs))
     <!> "multiStyleParser"
@@ -159,38 +160,85 @@ let plotParser =
     pstring "plot" >>. spaces >>. styleParser |>> fun (width, styleColorPairs) -> 
     ("plot", width, styleColorPairs)
 let barParser = 
-    pstring "bar" >>. spaces >>. styleParser |>> fun (width, styleColorPairs) -> 
+    pstring "bar" >>. spaces >>. choice [attempt styleParser; multiStyleParser] |>> fun (width, styleColorPairs) -> 
     ("bar", width, styleColorPairs)
 let stackbarParser = 
     pstring "stackbar" >>. spaces >>. multiStyleParser |>> fun (width, styleColorPairs) -> 
     ("stackbar", width, styleColorPairs)
 
-let graphicNameParser = manyChars notNewline
-let genericGraphicParser =
-    graphicNameParser >>= fun name ->
-    spaces >>. choice [styleParser; multiStyleParser] |>> fun (width, styleColorPairs) ->
-    (name, width, styleColorPairs)
+let pluginParser = pipe2 (many1Chars (noneOf " \t\r\n") .>> spaces) (choice [attempt styleParser; multiStyleParser]) (fun name (width, styleColorPairs) -> (name, width, styleColorPairs))
+
 let actionParser =
     choice [
         plotParser <!> "plotParser"; 
         barParser <!> "barParser";
         stackbarParser <!> "stackbarParser";
-        genericGraphicParser <!> "genericGraphicParser"
+        pluginParser <!> "pluginParser"
     ] <!> "actionParser"
 
 test actionParser "plot 100px solid #123456" // Success: ("plot", "100px", [("solid", "#123456")])
 test actionParser "bar 100px solid #123456" // Success: ("bar", "100px", [("solid", "#123456")])
 test actionParser "stackbar 100px [solid #123456, dotted #ff0000, dashed green]" // Success: ("stackbar", "100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
 test actionParser "plot 100px solid #123456, dotted #ff0000, dashed green" // Success: ("plot", "100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
-test actionParser "plugin 100px solid #123456" // Success: ("plugin", "100px", [("solid", "#123456")])
+test actionParser "plugin 100px solid #123456" // Should: ("plugin", "100px", [("solid", "#123456")])
 
 // command
 let commandParser =
-    pipe2 fieldsParser (between (pchar '{') (pchar '}') actionParser) (fun fields action -> (fields, action)) <!> "commandParser"
+    pipe2 
+        fieldsParser 
+        (between (pchar '{' >>. spaces) (spaces >>. pchar '}') actionParser) 
+        (fun fields action -> (fields, action)) <!> "commandParser"
 
 test commandParser "y, x { plot 100px solid #123456 }" // Success: ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))
+test commandParser "y,x{plot 100px solid #123456}" // Success: ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))
 
 // program
-let programParser = sepBy commandParser (many1 spaces) .>> eof
+let whitespace = choice [pchar ' '; pchar '\n'; pchar '\r';]
+let commandSeparator = many1 whitespace
+let programParser = sepBy commandParser commandSeparator .>> eof
 
-test programParser "y, x { plot 100px solid #123456 } x, y { bar 10px solid red }" // Success: [((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))]
+test programParser "y, x { plot 100px solid #123456 } x, y { bar 10px solid red }" // Success: [((["y"], "x"), ("plot", "100px", [("solid", "#123456")])); ((["x"], "y"), ("bar", "10px", [("solid", "red")]))]
+test programParser "y, x { plot 100px solid #123456 } [x1, x2], y { plugin 10px solid red }" // Success: [((["y"], "x"), ("plot", "100px", [("solid", "#123456")])); ((["x1"; "x2"], "y"), ("plugin", "10px", [("solid", "red")]))]
+test programParser "one, date {
+ bug 10px dashed red
+}
+
+three, date {
+  bar 10px dotted #7df
+}
+
+two,date {
+  plot 10px solid #d83
+}
+
+two, date {
+  plot 3px dotted green
+}
+
+[one, two, three], date { bar 10px [solid red, solid green, solid blue] }
+[one,two,three],date{stackbar 10px [solid orange,dashed #fed,dotted #8d2] }" // Success: [((["y"], "x"), ("plot", "100px", [("solid", "#123456")])); ((["x1"; "x2"], "y"), ("plugin", "10px", [("solid", "red")]))]
+
+test programParser "
+one, date {
+  plotplug 10px dashed red
+}
+
+three, date {
+  bar 10px dotted #7df
+}
+
+two,date {
+  plot 10px solid #d83
+}
+
+A, date {highlight 0 1 solid yellow }
+
+two, date {
+  plot 3px dotted green
+}
+
+[one, two, three], date { bar 10px [solid red, solid green, solid blue] }
+[one,two,three],date{stackbar 10px [solid orange,dashed #fed,dotted #8d2] }
+
+three, date { bleep blop blip green 10 }
+" // Should be success, but fails on plotplug, highlight, bleep, and the newline at the end of the program

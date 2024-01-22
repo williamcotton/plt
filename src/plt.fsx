@@ -25,6 +25,8 @@ let test p str =
     | Success(result, _, _) -> printfn "Success: %A" result
     | Failure(errorMsg, _, _) -> printfn "Failure: %s" errorMsg
 
+// common    
+let notNewline = satisfy (fun c -> c <> '\n' && c <> '\r')
 
 // fields
 let stringContent = many1Chars (noneOf ",[] \t\r\n")
@@ -147,29 +149,24 @@ test multiStyleParser "100px solid #123456, dotted]" // Failure: Error in Ln: 1 
 let plotParser = 
     pstring "plot" >>. spaces >>. styleParser |>> fun (width, [(style, color)]) -> 
     ("plot", width, [(style, color)])
-
 let barParser = 
     pstring "bar" >>. spaces >>. styleParser |>> fun (width, [(style, color)]) -> 
     ("bar", width, [(style, color)])
-
 let stackbarParser = 
     pstring "stackbar" >>. spaces >>. multiStyleParser |>> fun (width, styleColorPairs) -> 
     ("stackbar", width, styleColorPairs)
 
-let notNewline = satisfy (fun c -> c <> '\n' && c <> '\r')
-let graphicNameParser = manyChars notNewline
 
+
+let graphicNameParser = manyChars notNewline
 let genericGraphicParser = 
     graphicNameParser >>= fun name ->
-    spaces >>. choice [styleParser; multiStyleParser] >>= fun result ->
-    match result with
-    | (width, [(style, color)]) -> preturn (name, width, [(style, color)])
-    | (width, styleColorPairs) -> preturn (name, width, styleColorPairs)
-    
+    spaces >>. choice [styleParser; multiStyleParser] |>> fun (width, styleColorPairs) ->
+    (name, width, styleColorPairs)
 let actionParser =
     choice [
         plotParser; 
-        barParser; 
+        barParser;
         stackbarParser;
         genericGraphicParser;
     ]

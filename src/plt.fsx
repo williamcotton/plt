@@ -1,25 +1,11 @@
 #!/usr/bin/env dotnet fsi
 
 #r "nuget: FParsec"
-
-// grammar
-//
-// ```ebnf
-// program = command*;
-// command = fields "{" action "}";
-// fields = FIELDNAME "," FIELDNAME* | "[" FIELDNAME "," FIELDNAME* "]" "," FIELDNAME;
-// action = "plot" style | "bar" style | "stackbar" multi_style;
-// style = WIDTH DRAW_STYLE COLOR;
-// multi_style = WIDTH "[" DRAW_STYLE COLOR "," DRAW_STYLE COLOR "]";
-// FIELDNAME = [a-zA-Z0-9_]+;
-// WIDTH = [0-9]+ "px";
-// DRAW_STYLE = "solid" | "dashed" | "dotted";
-// COLOR = "red" | "green" | "blue" | "orange" | "black" | "yellow" | "#" [0-9a-fA-F]{6} | "#" [0-9a-fA-F]{3};
-// ```
+#r "nuget: Expecto"
 
 open FParsec
+open Expecto
 
-// test
 let test p str =
     match run p str with
     | Success(result, _, _) -> printfn "Success: %A" result
@@ -32,10 +18,6 @@ let (<!>) (p: Parser<_,_>) label : Parser<_,_> =
         printfn "%A: Leaving %s (%A)" stream.Position label reply.Status
         reply
 
-// common    
-// let notNewline = satisfy (fun c -> c <> '\n' && c <> '\r')
-
-// fields
 let stringContent = many1Chars (noneOf ",[]{} \t\r\n")
 let stringParser = spaces >>. stringContent .>> spaces
 let commaSeparatedStrings = sepBy stringParser (pstring ",")
@@ -46,36 +28,9 @@ let stringOrCommaSeparatedStringsBetweenBrackets =
         singleStringAsList
         commaSeparatedStringsBetweenBrackets
     ]
-
 let fieldsParser =
     spaces >>. pipe2 stringOrCommaSeparatedStringsBetweenBrackets (pstring "," >>. stringParser) (fun ys x -> (ys, x)) .>> spaces
 
-test stringContent "abc" // Success: "abc"
-test stringParser "  abc  " // Success: "abc"
-test commaSeparatedStrings "   a,   b,     c " // Success: ["a"; "b"; "c"]
-test commaSeparatedStringsBetweenBrackets "[a, b, c]" // Success: ["a"; "b"; "c"]
-test commaSeparatedStringsBetweenBrackets "[a, b, c" // Failure: Error in Ln: 1 Col: 9
-test commaSeparatedStringsBetweenBrackets "a, b, c]" // Failure: Error in Ln: 1 Col: 1
-test commaSeparatedStringsBetweenBrackets "[  
-     a   , b   ,  
-      c  
-]" // Success: ["a"; "b"; "c"]
-test stringOrCommaSeparatedStringsBetweenBrackets "test" // Success: ["test"]
-test stringOrCommaSeparatedStringsBetweenBrackets "[test1, test2]" // Success: ["test1"; "test2"]
-test fieldsParser "y, x" // Success: (["y"], "x")
-test fieldsParser "[y1, y2], x" // Success: (["y1"; "y2"], "x")
-test fieldsParser "[y1,y2],x" // Success: (["y1"; "y2"], "x")
-test fieldsParser "[y1,y2],x{}" // Success: (["y1"; "y2"], "x")
-test fieldsParser "   [y1, y2]  , x" // Success: (["y1"; "y2"], "x")
-test fieldsParser "   [  
-    y1
-,    y2   ]  , 
-x" // Success: (["y1"; "y2"], "x")
-test fieldsParser "y x" // Failure: Error in Ln: 1 Col: 3
-test fieldsParser "[y1, y2] x" // Failure: Error in Ln: 1 Col: 10
-test fieldsParser "[y1, y2], x, z" // Failure: Error in Ln: 1 Col: 12
-
-// color
 let hexadecimalDigit = satisfy (fun c -> isDigit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
 let hexColor =
     pstring "#" >>. manyChars hexadecimalDigit >>= fun hexDigits ->
@@ -88,30 +43,8 @@ let colorParser =
         hexColor
     ]
 
-test colorParser "red" // Success: "red"
-test colorParser "green" // Success: "green"
-test colorParser "blue" // Success: "blue"
-test colorParser "yellow" // Success: "yellow"
-test colorParser "orange" // Success: "orange"
-test colorParser "black" // Success: "black"
-test colorParser "#123de6" // Success: "#123de6"
-test colorParser "#1a3" // Success: "#123"
-test colorParser "#1z3" // Failure: Error in Ln: 1 Col: 3
-test colorParser "#1f34" // Failure: Error in Ln: 1 Col: 6
-test colorParser "#12d45" // Failure: Error in Ln: 1 Col: 7
-test colorParser "#1234567" // Failure: Error in Ln: 1 Col: 9
-test colorParser "#123dez" // Failure: Error in Ln: 1 Col: 
-
-// width
 let widthParser = many1Chars digit .>> pstring "px" |>> (fun digits -> digits + "px")
 
-test widthParser "1px" // Success: "1px"
-test widthParser "10px" // Success: "10px"
-test widthParser "100px" // Success: "100px"
-test widthParser "1000px" // Success: "1000px"
-test widthParser "sdf" // Failure: Error in Ln: 1 Col: 1
-
-// draw style
 let drawStyleParser =
     choice [
         pstring "solid"; 
@@ -119,23 +52,8 @@ let drawStyleParser =
         pstring "dotted"
     ]
 
-test drawStyleParser "solid" // Success: "solid"
-test drawStyleParser "dashed" // Success: "dashed"
-test drawStyleParser "dotted" // Success: "dotted"
-test drawStyleParser "sdfsdf" // Failure: Error in Ln: 1 Col: 6
-
 let styleParser =
     pipe3 (widthParser .>> spaces) (drawStyleParser .>> spaces) (colorParser .>> spaces) (fun width style color -> (width, [(style, color)]))
-
-test styleParser "100px solid #123456" // Success: ("100px", "solid", "#123456")
-test styleParser "50px dashed red" // Success: ("50px", "dashed", "red")
-test styleParser "10px dotted #123" // Success: ("10px", "dotted", "#123")
-test styleParser "10px dotted #123    {" // Success: ("10px", "dotted", "#123")
-test styleParser "10px sdfsdf #123456" // Failure: Error in Ln: 1 Col: 6
-test styleParser "sdf sdfsdf #123456" // Failure: Error in Ln: 1 Col: 1
-test styleParser "10px dotted #1234" // Failure: Error in Ln: 1 Col: 18
-
-// multi_style
 
 let styleColorPairParser =
     pipe2 (drawStyleParser .>> spaces) colorParser (fun style color -> (style, color))
@@ -147,98 +65,333 @@ let multiStyleParser =
         )
         (fun width styleColorPairs -> (width, styleColorPairs))
 
-test multiStyleParser "100px [solid #123456, dotted #ff0000, dashed green]" // Success: ("100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
-test multiStyleParser "50px [dashed blue]" // Success: ("50px", [("dashed", "blue")])
-test multiStyleParser "20px [solid #123, dashed #abc, dotted yellow]" // Success: ("20px", [("solid", "#123"); ("dashed", "#abc"); ("dotted", "yellow")])
-test multiStyleParser "100px [solid #123456]" // Success: ("100px", [("solid", "#123456")])
-test multiStyleParser "100px solid #123456, dotted]" // Failure: Error in Ln: 1 Col: 21
+let actionParser = pipe2 (many1Chars (noneOf " \t\r\n") .>> spaces) (choice [attempt styleParser; multiStyleParser]) (fun name (width, styleColorPairs) -> (name, width, styleColorPairs))
 
-// action
-
-let plotParser = 
-    pstring "plot" >>. spaces >>. styleParser |>> fun (width, styleColorPairs) -> 
-    ("plot", width, styleColorPairs)
-let barParser = 
-    pstring "bar" >>. spaces >>. choice [attempt styleParser; multiStyleParser] |>> fun (width, styleColorPairs) -> 
-    ("bar", width, styleColorPairs)
-let stackbarParser = 
-    pstring "stackbar" >>. spaces >>. multiStyleParser |>> fun (width, styleColorPairs) -> 
-    ("stackbar", width, styleColorPairs)
-
-let pluginParser = pipe2 (many1Chars (noneOf " \t\r\n") .>> spaces) (choice [attempt styleParser; multiStyleParser]) (fun name (width, styleColorPairs) -> (name, width, styleColorPairs))
-
-let actionParser =
-    choice [
-        plotParser; 
-        barParser;
-        stackbarParser;
-        pluginParser;
-    ]
-
-test actionParser "plot 100px solid #123456" // Success: ("plot", "100px", [("solid", "#123456")])
-test actionParser "bar 100px solid #123456" // Success: ("bar", "100px", [("solid", "#123456")])
-test actionParser "stackbar 100px [solid #123456, dotted #ff0000, dashed green]" // Success: ("stackbar", "100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
-test actionParser "plot 100px solid #123456, dotted #ff0000, dashed green" // Success: ("plot", "100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])
-test actionParser "plugin 100px solid #123456" // Should: ("plugin", "100px", [("solid", "#123456")])
-test actionParser "plotplug 100px solid #123456" // Should: ("plotplug", "100px", [("solid", "#123456")])
-
-// command
 let commandParser =
-    pipe2 
+    (pipe2 
         fieldsParser 
         (between (pchar '{' >>. spaces) (spaces >>. pchar '}') actionParser) 
-        (fun fields action -> (fields, action))
+        (fun fields action -> (fields, action)))
 
-test commandParser "y, x { plot 100px solid #123456 }" // Success: ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))
-test commandParser "y,x{plot 100px solid #123456}" // Success: ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))
+let programParser =
+    spaces 
+    >>. many (spaces >>. commandParser .>> spaces)
 
-// program
-let whitespace = choice [pchar ' '; pchar '\n'; pchar '\r';]
-let commandSeparator = many1 whitespace
-let programParser = sepBy commandParser commandSeparator .>> eof
+// Tests
 
-test programParser "y, x { plot 100px solid #123456 } x, y { bar 10px solid red }" // Success: [((["y"], "x"), ("plot", "100px", [("solid", "#123456")])); ((["x"], "y"), ("bar", "10px", [("solid", "red")]))]
-test programParser "y, x { plot 100px solid #123456 } [x1, x2], y { plugin 10px solid red }" // Success: [((["y"], "x"), ("plot", "100px", [("solid", "#123456")])); ((["x1"; "x2"], "y"), ("plugin", "10px", [("solid", "red")]))]
-test programParser "one, date {
- bug 10px dashed red
-}
+let testParser (p: Parser<_,_>) input expected =
+    match run p input with
+    | Success(result, _, _) -> result = expected
+    | Failure(_, _, _) -> false
 
-three, date {
-  bar 10px dotted #7df
-}
+[<Tests>]
+let tests = 
+    testList "Parser Tests" [
+        testList "stringContent" [
+            testCase "stringContent with 'abc'" <| fun () ->
+                Expect.isTrue (testParser stringContent "abc" "abc") "stringContent should parse 'abc'"
 
-two,date {
-  plot 10px solid #d83
-}
+            testCase "stringContent with 'abc def'" <| fun () ->
+                Expect.isTrue (testParser stringContent "abc def" "abc") "stringContent should parse 'abc'"
 
-two, date {
-  plot 3px dotted green
-}
+            testCase "stringContent with 'abc def ghi'" <| fun () ->
+                Expect.isTrue (testParser stringContent "abc def ghi" "abc") "stringContent should parse 'abc'"
+        ]
+        
+        testList "stringParser" [
+            testCase "stringParser with 'abc'" <| fun () ->
+                Expect.isTrue (testParser stringParser "abc" "abc") "stringParser should parse 'abc'"
 
-[one, two, three], date { bar 10px [solid red, solid green, solid blue] }
-[one,two,three],date{stackbar 10px [solid orange,dashed #fed,dotted #8d2] }" // Success: [((["y"], "x"), ("plot", "100px", [("solid", "#123456")])); ((["x1"; "x2"], "y"), ("plugin", "10px", [("solid", "red")]))]
+            testCase "stringParser with '  abc  '" <| fun () ->
+                Expect.isTrue (testParser stringParser "  abc  " "abc") "stringParser should parse 'abc'"
 
-test programParser "
-one, date {
-  plotplug 10px dashed red
-}
+            testCase "stringParser with '  abc  def  '" <| fun () ->
+                Expect.isTrue (testParser stringParser "  abc  def  " "abc") "stringParser should parse 'abc'"
+        ]
 
-three, date {
-  bar 10px dotted #7df
-}
+        testList "commaSeparatedStrings" [
+            testCase "commaSeparatedStrings with 'a,b, c'" <| fun () ->
+                Expect.isTrue (testParser commaSeparatedStrings "a, b, c" ["a"; "b"; "c"]) "commaSeparatedStrings should parse 'a, b, c'"
 
-two,date {
-  plot 10px solid #d83
-}
+            testCase "commaSeparatedStrings with '   a,   b,     c '" <| fun () ->
+                Expect.isTrue (testParser commaSeparatedStrings "   a,   b,     c " ["a"; "b"; "c"]) "commaSeparatedStrings should parse 'a, b, c'"
+        ]
 
-A, date {highlight 0 1 solid yellow }
+        testList "commaSeparatedStringsBetweenBrackets" [
+            testCase "commaSeparatedStringsBetweenBrackets with '[a, b, c]'" <| fun () ->
+                Expect.isTrue (testParser commaSeparatedStringsBetweenBrackets "[a, b, c]" ["a"; "b"; "c"]) "commaSeparatedStringsBetweenBrackets should parse '[a, b, c]'"
 
-two, date {
-  plot 3px dotted green
-}
+            testCase "commaSeparatedStringsBetweenBrackets with '[a, b, c'" <| fun () ->
+                Expect.isFalse (testParser commaSeparatedStringsBetweenBrackets "[a, b, c" ["a"; "b"; "c"]) "commaSeparatedStringsBetweenBrackets should fail on incomplete bracket"
 
-[one, two, three], date { bar 10px [solid red, solid green, solid blue] }
-[one,two,three],date{stackbar 10px [solid orange,dashed #fed,dotted #8d2] }
+            testCase "commaSeparatedStringsBetweenBrackets with 'a, b, c]'" <| fun () ->
+                Expect.isFalse (testParser commaSeparatedStringsBetweenBrackets "a, b, c]" ["a"; "b"; "c"]) "commaSeparatedStringsBetweenBrackets should fail on incomplete bracket"
 
-three, date { bleep blop blip green 10 }
-" // Should be success, but fails on plotplug, highlight, bleep, and the newline at the end of the program
+            testCase "commaSeparatedStringsBetweenBrackets with '[
+                    a   , b   ,
+                        c
+                ]'" <| fun () ->
+                Expect.isTrue (testParser commaSeparatedStringsBetweenBrackets "[
+                        a   , b   ,
+                            c
+                    ]" ["a"; "b"; "c"]) "commaSeparatedStringsBetweenBrackets should parse '[a, b, c]'"
+        ]
+
+        testList "stringOrCommaSeparatedStringsBetweenBrackets Tests" [
+            testCase "stringOrCommaSeparatedStringsBetweenBrackets with 'test'" <| fun () ->
+                Expect.isTrue (testParser stringOrCommaSeparatedStringsBetweenBrackets "test" ["test"]) "stringOrCommaSeparatedStringsBetweenBrackets should parse 'test'"
+
+            testCase "stringOrCommaSeparatedStringsBetweenBrackets with '[test1, test2]'" <| fun () ->
+                Expect.isTrue (testParser stringOrCommaSeparatedStringsBetweenBrackets "[test1, test2]" ["test1"; "test2"]) "stringOrCommaSeparatedStringsBetweenBrackets should parse '[test1, test2]'"
+        ]
+
+        testList "fieldsParser Tests" [
+            testCase "fieldsParser with 'y, x'" <| fun () ->
+                Expect.isTrue (testParser fieldsParser "y, x" (["y"], "x")) "fieldsParser should parse 'y, x'"
+
+            testCase "fieldsParser with '[y1, y2], x'" <| fun () ->
+                Expect.isTrue (testParser fieldsParser "[y1, y2], x" (["y1"; "y2"], "x")) "fieldsParser should parse '[y1, y2], x'"
+
+            testCase "fieldsParser with '[y1,y2],x'" <| fun () ->
+                Expect.isTrue (testParser fieldsParser "[y1,y2],x" (["y1"; "y2"], "x")) "fieldsParser should parse '[y1,y2],x'"
+
+            testCase "fieldsParser with '[y1,y2],x{}'" <| fun () ->
+                Expect.isTrue (testParser fieldsParser "[y1,y2],x{}" (["y1"; "y2"], "x")) "fieldsParser should parse '[y1,y2],x{}'"
+
+            testCase "fieldsParser with '   [y1, y2]  , x'" <| fun () ->
+                Expect.isTrue (testParser fieldsParser "   [y1, y2]  , x" (["y1"; "y2"], "x")) "fieldsParser should parse '   [y1, y2]  , x'"
+
+            testCase "fieldsParser with multiline input" <| fun () ->
+                Expect.isTrue (testParser fieldsParser "   [  
+                    y1
+                ,    y2   ]  , 
+                x" (["y1"; "y2"], "x")) "fieldsParser should parse multiline input"
+
+            testCase "fieldsParser with 'y x' (should fail)" <| fun () ->
+                Expect.isFalse (testParser fieldsParser "y x" (["y"], "x")) "fieldsParser should fail on 'y x'"
+
+            testCase "fieldsParser with '[y1, y2] x' (should fail)" <| fun () ->
+                Expect.isFalse (testParser fieldsParser "[y1, y2] x" (["y1"; "y2"], "x")) "fieldsParser should fail on '[y1, y2] x'"
+
+            testCase "fieldsParser with '[y1, y2], x, z' (should fail)" <| fun () ->
+                Expect.isTrue (testParser fieldsParser "[y1, y2], x, z" (["y1"; "y2"], "x")) "fieldsParser should fail on '[y1, y2], x, z'"
+        ]
+
+        testList "colorParser Tests" [
+            testCase "colorParser with 'red'" <| fun () ->
+                Expect.isTrue (testParser colorParser "red" "red") "colorParser should parse 'red'"
+
+            testCase "colorParser with 'green'" <| fun () ->
+                Expect.isTrue (testParser colorParser "green" "green") "colorParser should parse 'green'"
+
+            testCase "colorParser with 'blue'" <| fun () ->
+                Expect.isTrue (testParser colorParser "blue" "blue") "colorParser should parse 'blue'"
+
+            testCase "colorParser with 'yellow'" <| fun () ->
+                Expect.isTrue (testParser colorParser "yellow" "yellow") "colorParser should parse 'yellow'"
+
+            testCase "colorParser with 'orange'" <| fun () ->
+                Expect.isTrue (testParser colorParser "orange" "orange") "colorParser should parse 'orange'"
+
+            testCase "colorParser with 'black'" <| fun () ->
+                Expect.isTrue (testParser colorParser "black" "black") "colorParser should parse 'black'"
+
+            testCase "colorParser with '#123de6'" <| fun () ->
+                Expect.isTrue (testParser colorParser "#123de6" "#123de6") "colorParser should parse '#123de6'"
+
+            testCase "colorParser with '#1a3'" <| fun () ->
+                Expect.isTrue (testParser colorParser "#1a3" "#1a3") "colorParser should parse '#1a3'"
+
+            testCase "colorParser with invalid hex '#1z3'" <| fun () ->
+                Expect.isFalse (testParser colorParser "#1z3" "#1z3") "colorParser should fail on '#1z3'"
+
+            testCase "colorParser with invalid hex '#1f34'" <| fun () ->
+                Expect.isFalse (testParser colorParser "#1f34" "#1f34") "colorParser should fail on '#1f34'"
+
+            testCase "colorParser with invalid hex '#12d45'" <| fun () ->
+                Expect.isFalse (testParser colorParser "#12d45" "#12d45") "colorParser should fail on '#12d45'"
+
+            testCase "colorParser with too long hex '#1234567'" <| fun () ->
+                Expect.isFalse (testParser colorParser "#1234567" "#1234567") "colorParser should fail on '#1234567'"
+
+            testCase "colorParser with invalid hex '#123dez'" <| fun () ->
+                Expect.isFalse (testParser colorParser "#123dez" "#123dez") "colorParser should fail on '#123dez'"
+        ]
+
+        testList "widthParser Tests" [
+            testCase "widthParser with '1px'" <| fun () ->
+                Expect.isTrue (testParser widthParser "1px" "1px") "widthParser should parse '1px'"
+
+            testCase "widthParser with '10px'" <| fun () ->
+                Expect.isTrue (testParser widthParser "10px" "10px") "widthParser should parse '10px'"
+
+            testCase "widthParser with '100px'" <| fun () ->
+                Expect.isTrue (testParser widthParser "100px" "100px") "widthParser should parse '100px'"
+
+            testCase "widthParser with '1000px'" <| fun () ->
+                Expect.isTrue (testParser widthParser "1000px" "1000px") "widthParser should parse '1000px'"
+
+            testCase "widthParser with invalid input 'sdf'" <| fun () ->
+                Expect.isFalse (testParser widthParser "sdf" "sdf") "widthParser should fail on 'sdf'"
+        ]
+
+        testList "drawStyleParser Tests" [
+            testCase "drawStyleParser with 'solid'" <| fun () ->
+                Expect.isTrue (testParser drawStyleParser "solid" "solid") "drawStyleParser should parse 'solid'"
+
+            testCase "drawStyleParser with 'dashed'" <| fun () ->
+                Expect.isTrue (testParser drawStyleParser "dashed" "dashed") "drawStyleParser should parse 'dashed'"
+
+            testCase "drawStyleParser with 'dotted'" <| fun () ->
+                Expect.isTrue (testParser drawStyleParser "dotted" "dotted") "drawStyleParser should parse 'dotted'"
+
+            testCase "drawStyleParser with invalid input 'sdfsdf'" <| fun () ->
+                Expect.isFalse (testParser drawStyleParser "sdfsdf" "sdfsdf") "drawStyleParser should fail on 'sdfsdf'"
+        ]
+
+        testList "styleParser Tests" [
+            testCase "styleParser with '100px solid #123456'" <| fun () ->
+                Expect.isTrue (testParser styleParser "100px solid #123456" ("100px", [("solid", "#123456")])) "styleParser should parse '100px solid #123456'"
+
+            testCase "styleParser with '50px dashed red'" <| fun () ->
+                Expect.isTrue (testParser styleParser "50px dashed red" ("50px", [("dashed", "red")])) "styleParser should parse '50px dashed red'"
+
+            testCase "styleParser with '10px dotted #123'" <| fun () ->
+                Expect.isTrue (testParser styleParser "10px dotted #123" ("10px", [("dotted", "#123")])) "styleParser should parse '10px dotted #123'"
+
+            testCase "styleParser with trailing characters '10px dotted #123    { '" <| fun () ->
+                Expect.isTrue (testParser styleParser "10px dotted #123    {" ("10px", [("dotted", "#123")])) "styleParser should parse '10px dotted #123    {'"
+
+            testCase "styleParser with invalid drawStyle '10px sdfsdf #123456'" <| fun () ->
+                Expect.isFalse (testParser styleParser "10px sdfsdf #123456" ("10px", [("sdfsdf", "#123456")])) "styleParser should fail on '10px sdfsdf #123456'"
+
+            testCase "styleParser with invalid width 'sdf sdfsdf #123456'" <| fun () ->
+                Expect.isFalse (testParser styleParser "sdf sdfsdf #123456" ("sdf", [("sdfsdf", "#123456")])) "styleParser should fail on 'sdf sdfsdf #123456'"
+
+            testCase "styleParser with invalid color '10px dotted #1234'" <| fun () ->
+                Expect.isFalse (testParser styleParser "10px dotted #1234" ("10px", [("dotted", "#1234")])) "styleParser should fail on '10px dotted #1234'"
+        ]
+
+        testList "multiStyleParser Tests" [
+            testCase "multiStyleParser with '100px [solid #123456, dotted #ff0000, dashed green]'" <| fun () ->
+                Expect.isTrue (testParser multiStyleParser "100px [solid #123456, dotted #ff0000, dashed green]" ("100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])) "multiStyleParser should parse '100px [solid #123456, dotted #ff0000, dashed green]'"
+
+            testCase "multiStyleParser with '50px [dashed blue]'" <| fun () ->
+                Expect.isTrue (testParser multiStyleParser "50px [dashed blue]" ("50px", [("dashed", "blue")])) "multiStyleParser should parse '50px [dashed blue]'"
+
+            testCase "multiStyleParser with '20px [solid #123, dashed #abc, dotted yellow]'" <| fun () ->
+                Expect.isTrue (testParser multiStyleParser "20px [solid #123, dashed #abc, dotted yellow]" ("20px", [("solid", "#123"); ("dashed", "#abc"); ("dotted", "yellow")])) "multiStyleParser should parse '20px [solid #123, dashed #abc, dotted yellow]'"
+
+            testCase "multiStyleParser with '100px [solid #123456]'" <| fun () ->
+                Expect.isTrue (testParser multiStyleParser "100px [solid #123456]" ("100px", [("solid", "#123456")])) "multiStyleParser should parse '100px [solid #123456]'"
+
+            testCase "multiStyleParser with incomplete input '100px solid #123456, dotted]'" <| fun () ->
+                Expect.isFalse (testParser multiStyleParser "100px solid #123456, dotted]" ("100px", [("solid", "#123456"); ("dotted", "")])) "multiStyleParser should fail on '100px solid #123456, dotted]'"
+        ]
+
+        testList "actionParser Tests" [
+            testCase "actionParser with 'plot 100px solid #123456'" <| fun () ->
+                Expect.isTrue (testParser actionParser "plot 100px solid #123456" ("plot", "100px", [("solid", "#123456")])) "actionParser should parse 'plot 100px solid #123456'"
+
+            testCase "actionParser with 'bar 100px solid #123456'" <| fun () ->
+                Expect.isTrue (testParser actionParser "bar 100px solid #123456" ("bar", "100px", [("solid", "#123456")])) "actionParser should parse 'bar 100px solid #123456'"
+
+            testCase "actionParser with 'stackbar 100px [solid #123456, dotted #ff0000, dashed green]'" <| fun () ->
+                Expect.isTrue (testParser actionParser "stackbar 100px [solid #123456, dotted #ff0000, dashed green]" ("stackbar", "100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])) "actionParser should parse 'stackbar 100px [solid #123456, dotted #ff0000, dashed green]'"
+
+            testCase "actionParser with 'plugin 100px solid #123456'" <| fun () ->
+                Expect.isTrue (testParser actionParser "plugin 100px solid #123456" ("plugin", "100px", [("solid", "#123456")])) "actionParser should parse 'plugin 100px solid #123456'"
+
+            testCase "actionParser with 'plotplug 100px solid #123456'" <| fun () ->
+                Expect.isTrue (testParser actionParser "plotplug 100px solid #123456" ("plotplug", "100px", [("solid", "#123456")])) "actionParser should parse 'plotplug 100px solid #123456'"
+        ]
+
+        testList "commandParser Tests" [
+            testCase "commandParser with 'y, x { plot 100px solid #123456 }'" <| fun () ->
+                Expect.isTrue (testParser commandParser "y, x { plot 100px solid #123456 }" ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))) "commandParser should parse 'y, x { plot 100px solid #123456 }'"
+
+            testCase "commandParser with 'y,x{plot 100px solid #123456}'" <| fun () ->
+                Expect.isTrue (testParser commandParser "y,x{plot 100px solid #123456}" ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))) "commandParser should parse 'y,x{plot 100px solid #123456}'"
+
+            testCase "commandParser with spaces '   y   ,  x   {    plot    100px    solid    #123456    }    '" <| fun () ->
+                Expect.isTrue (testParser commandParser "   y   ,  x   {    plot    100px    solid    #123456    }    " ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))) "commandParser should parse '   y   ,  x   {    plot    100px    solid    #123456    }    '"
+        ]
+
+        testList "programParser Tests" [
+            testCase "programParser with simple commands" <| fun () ->
+                let expected = [((["y"], "x"), ("plot", "100px", [("solid", "#123456")]));
+                                ((["x"], "y"), ("bar", "10px", [("solid", "red")]))]
+                Expect.isTrue (testParser programParser "y, x { plot 100px solid #123456 } x, y { bar 10px solid red }" expected) "programParser should parse simple commands"
+
+            testCase "programParser with multiple field commands" <| fun () ->
+                let expected = [((["y"], "x"), ("plot", "100px", [("solid", "#123456")]));
+                                ((["x1"; "x2"], "y"), ("plugin", "10px", [("solid", "red")]))]
+                Expect.isTrue (testParser programParser "y, x { plot 100px solid #123456 } [x1, x2], y { plugin 10px solid red }" expected) "programParser should parse multiple field commands"
+
+            testCase "programParser with complex multi-command input" <| fun () ->
+                let expected = [((["one"], "date"), ("bug", "10px", [("dashed", "red")]));
+                                ((["three"], "date"), ("bar", "10px", [("dotted", "#7df")]));
+                                ((["two"], "date"), ("plot", "10px", [("solid", "#d83")]));
+                                ((["two"], "date"), ("plot", "3px", [("dotted", "green")]));
+                                ((["one"; "two"; "three"], "date"), ("bar", "10px", [("solid", "red"); ("solid", "green"); ("solid", "blue")]));
+                                ((["one"; "two"; "three"], "date"), ("stackbar", "10px", [("solid", "orange"); ("dashed", "#fed"); ("dotted", "#8d2")]))]
+                Expect.isTrue (testParser programParser "
+                    one, date {
+                    bug 10px dashed red
+                    }
+
+                    three, date {
+                    bar 10px dotted #7df
+                    }
+
+                    two,date {
+                    plot 10px solid #d83
+                    }
+
+                    two, date {
+                    plot 3px dotted green
+                    }
+
+                    [one, two, three], date { bar 10px [solid red, solid green, solid blue] }
+                    [one,two,three],date{stackbar 10px [solid orange,dashed #fed,dotted #8d2] }
+                    " expected) "programParser should parse complex multi-command input"
+
+            testCase "programParser with extensive commands and new actions" <| fun () ->
+                let expected = [((["one"], "date"), ("plotplug", "10px", [("dashed", "red")]));
+                                ((["three"], "date"), ("bar", "10px", [("dotted", "#7df")]));
+                                ((["two"], "date"), ("plot", "10px", [("solid", "#d83")]));
+                                ((["A"], "date"), ("highlight", "01px", [("solid", "yellow")]));
+                                ((["two"], "date"), ("plot", "3px", [("dotted", "green")]));
+                                ((["one"; "two"; "three"], "date"), ("bar", "10px", [("solid", "red"); ("solid", "green"); ("solid", "blue")]));
+                                ((["one"; "two"; "three"], "date"), ("stackbar", "10px", [("solid", "orange"); ("dashed", "#fed"); ("dotted", "#8d2")]));
+                                ((["three"], "date"), ("bleep", "10px", [("dotted", "green")]))]
+                Expect.isTrue (testParser programParser "
+                    one, date {
+                    plotplug 10px dashed red
+                    }
+
+                    three, date {
+                    bar 10px dotted #7df
+                    }
+
+                    two,date {
+                    plot 10px solid #d83
+                    }
+
+                    A, date {highlight 01px solid yellow }
+
+                    two, date {
+                    plot 3px dotted green
+                    }
+
+                    [one, two, three], date { bar 10px [solid red, solid green, solid blue] }
+                    [one,two,three],date{stackbar 10px [solid orange,dashed #fed,dotted #8d2] }
+
+                    three, date { bleep 10px dotted green }
+                    " expected) "programParser should parse extensive commands and new actions"
+        ]
+
+
+    ]
+
+runTestsWithCLIArgs [] [||] tests

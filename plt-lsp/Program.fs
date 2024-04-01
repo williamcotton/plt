@@ -140,10 +140,43 @@ let rec printASTNode node =
         printfn "Command:"
         nodes |> List.iter printASTNode
     | EmptyNode -> ignore()
+    
+
+let rec collectErrorNodes astNode =
+    match astNode with
+    | ErrorNode(_, _) -> [astNode]
+    | CommandNode(nodes) -> List.collect collectErrorNodes nodes
+    | _ -> []
+
+let getAllErrorNodes ast =
+    List.collect collectErrorNodes ast
+
+let createErrorIndicator (errorNodes: ASTNode list) programLength =
+    // Initialize a string of whitespace with the length of the program
+    let indicatorArray = Array.create programLength ' '
+
+    // Function to update the indicator array based on the position in an ErrorNode
+    let updateIndicator (node: ASTNode) =
+        match node with
+        | ErrorNode(_, pos) ->
+            let column = int pos.Column
+            let index = column - 1 // Convert 1-based column number to 0-based array index
+
+            if index >= 0 && index < Array.length indicatorArray then
+                indicatorArray.[index] <- '-'
+        | _ -> () // Ignore non-error nodes
+
+    // Update the indicator array for each error node
+    errorNodes |> List.iter updateIndicator
+
+    // Convert the indicator array back to a string
+    new string (indicatorArray)
 
 [<EntryPoint>]
 let main argv =
     let program : string = argv.[0]
     let validatedAST = runAndValidate program
     validatedAST |> List.iter printASTNode
-    0
+    printfn "%s" program
+    printfn "%s" (createErrorIndicator (getAllErrorNodes validatedAST) (program.Length + 3))
+    0                                               

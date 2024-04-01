@@ -95,22 +95,17 @@ let programStringParser =
     many combinedParser
 
 let validateNodeWithParser parser (node: ASTNode) =
-    match node with
-    | ActionNode(s, pos)
-    | FieldsNode(s, pos) ->
+    let parseNode s pos nodeType =
         match run parser s with
         | Success(_, _, _) -> node
         | Failure(msg, _, _) ->
             let errorDetail = msg.Trim().Split('\n') |> Array.last
             let stringDetail = msg.Trim().Split('\n') |> Array.tail |> Array.head
-
-            let nodeType =
-                match node with
-                | ActionNode _ -> "Action"
-                | FieldsNode _ -> "Fields"
-                | _ -> "Unknown"
-
             ErrorNode(sprintf "%s - %s - %s" nodeType stringDetail errorDetail, pos)
+
+    match node with
+    | ActionNode(s, pos) -> parseNode s pos "Action"
+    | FieldsNode(s, pos) -> parseNode s pos "Fields"
     | _ -> node
 
 let actionValidatorParser =

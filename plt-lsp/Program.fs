@@ -45,21 +45,16 @@ let drawStyleParser =
     ]
 
 let styleParser =
-    pipe3 (widthParser .>> spaces) (drawStyleParser .>> spaces) (colorParser .>> spaces) (fun width style color -> (width, [(style, color)]))
+    pipe2 (drawStyleParser .>> spaces) (colorParser .>> spaces) (fun style color -> (style, color))
 
 let styleColorPairParser =
     pipe2 (drawStyleParser .>> spaces) colorParser (fun style color -> (style, color))
+
 let multiStyleParser =
-    pipe2 
-        (widthParser .>> spaces) 
-        (between (pchar '[') (pchar ']') 
-            (sepBy styleColorPairParser (pstring "," .>> spaces))
-        )
-        (fun width styleColorPairs -> (width, styleColorPairs))
+    between (pchar '[') (pchar ']') (sepBy styleColorPairParser (pstring "," .>> spaces))
 
-let actionParser = pipe2 (many1Chars (noneOf " \t\r\n") .>> spaces) (choice [attempt styleParser; multiStyleParser]) (fun name (width, styleColorPairs) -> (name, width, styleColorPairs))
-
-
+let actionParser = 
+    pipe3 (many1Chars (noneOf " \t\r\n") .>> spaces) (widthParser .>> spaces) (choice [attempt styleParser |>> fun sc -> [sc] |> ignore; multiStyleParser]) (fun name width styleColorPairs -> (name, width, styleColorPairs))
 let openBrace = pstring "{" .>> spaces
 let closeBrace = spaces >>. pstring "}"
 

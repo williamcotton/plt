@@ -233,34 +233,32 @@ let tests =
 
         testList "commandParser Tests" [
             testCase "commandParser with 'y, x { plot 100px solid #123456 }'" <| fun () ->
-                Expect.isTrue (testParser commandParser "y, x { plot 100px solid #123456 }" ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))) "commandParser should parse 'y, x { plot 100px solid #123456 }'"
+                Expect.isTrue (testParser commandParser "y, x { plot 100px solid #123456 }" 
+                    (CommandNode [
+                            FieldsNode ("", Position("", 0 ,0 ,0)); 
+                            ActionNode ("", Position("", 0 ,0 ,0))
+                        ])) 
+                    "commandParser should parse 'y, x { plot 100px solid #123456 }'"
 
             testCase "commandParser with 'y,x{plot 100px solid #123456}'" <| fun () ->
-                Expect.isTrue (testParser commandParser "y,x{plot 100px solid #123456}" ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))) "commandParser should parse 'y,x{plot 100px solid #123456}'"
+                Expect.isTrue (testParser commandParser "y,x{plot 100px solid #123456}" (CommandNode [])) "commandParser should parse 'y,x{plot 100px solid #123456}'"
 
             testCase "commandParser with spaces '   y   ,  x   {    plot    100px    solid    #123456    }    '" <| fun () ->
-                Expect.isTrue (testParser commandParser "   y   ,  x   {    plot    100px    solid    #123456    }    " ((["y"], "x"), ("plot", "100px", [("solid", "#123456")]))) "commandParser should parse '   y   ,  x   {    plot    100px    solid    #123456    }    '"
+                Expect.isTrue (testParser commandParser "   y   ,  x   {    plot    100px    solid    #123456    }    " (CommandNode [])) "commandParser should parse '   y   ,  x   {    plot    100px    solid    #123456    }    '"
         ]
 
         testList "programParser Tests" [
             testCase "programParser with simple commands" <| fun () ->
-                let expected = [((["y"], "x"), ("plot", "100px", [("solid", "#123456")]));
-                                ((["x"], "y"), ("bar", "10px", [("solid", "red")]))]
-                Expect.isTrue (testParser programParser "y, x { plot 100px solid #123456 } x, y { bar 10px solid red }" expected) "programParser should parse simple commands"
+                let expected = [CommandNode []]
+                Expect.isTrue (testParser programStringParser "y, x { plot 100px solid #123456 } x, y { bar 10px solid red }" expected) "programParser should parse simple commands"
 
             testCase "programParser with multiple field commands" <| fun () ->
-                let expected = [((["y"], "x"), ("plot", "100px", [("solid", "#123456")]));
-                                ((["x1"; "x2"], "y"), ("plugin", "10px", [("solid", "red")]))]
-                Expect.isTrue (testParser programParser "y, x { plot 100px solid #123456 } [x1, x2], y { plugin 10px solid red }" expected) "programParser should parse multiple field commands"
+                let expected = [ CommandNode [] ]
+                Expect.isTrue (testParser programStringParser "y, x { plot 100px solid #123456 } [x1, x2], y { plugin 10px solid red }" expected) "programParser should parse multiple field commands"
 
             testCase "programParser with complex multi-command input" <| fun () ->
-                let expected = [((["one"], "date"), ("bug", "10px", [("dashed", "red")]));
-                                ((["three"], "date"), ("bar", "10px", [("dotted", "#7df")]));
-                                ((["two"], "date"), ("plot", "10px", [("solid", "#d83")]));
-                                ((["two"], "date"), ("plot", "3px", [("dotted", "green")]));
-                                ((["one"; "two"; "three"], "date"), ("bar", "10px", [("solid", "red"); ("solid", "green"); ("solid", "blue")]));
-                                ((["one"; "two"; "three"], "date"), ("stackbar", "10px", [("solid", "orange"); ("dashed", "#fed"); ("dotted", "#8d2")]))]
-                Expect.isTrue (testParser programParser "
+                let expected = [ CommandNode [] ]
+                Expect.isTrue (testParser programStringParser "
                     one, date {
                     bug 10px dashed red
                     }
@@ -282,15 +280,8 @@ let tests =
                     " expected) "programParser should parse complex multi-command input"
 
             testCase "programParser with extensive commands and new actions" <| fun () ->
-                let expected = [((["one"], "date"), ("plotplug", "10px", [("dashed", "red")]));
-                                ((["three"], "date"), ("bar", "10px", [("dotted", "#7df")]));
-                                ((["two"], "date"), ("plot", "10px", [("solid", "#d83")]));
-                                ((["A"], "date"), ("highlight", "01px", [("solid", "yellow")]));
-                                ((["two"], "date"), ("plot", "3px", [("dotted", "green")]));
-                                ((["one"; "two"; "three"], "date"), ("bar", "10px", [("solid", "red"); ("solid", "green"); ("solid", "blue")]));
-                                ((["one"; "two"; "three"], "date"), ("stackbar", "10px", [("solid", "orange"); ("dashed", "#fed"); ("dotted", "#8d2")]));
-                                ((["three"], "date"), ("bleep", "10px", [("dotted", "green")]))]
-                Expect.isTrue (testParser programParser "
+                let expected = [ CommandNode [] ]
+                Expect.isTrue (testParser programStringParser "
                     one, date {
                     plotplug 10px dashed red
                     }

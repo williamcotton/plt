@@ -176,6 +176,7 @@ let createErrorIndicator (errorNodes: ASTNode list) programLength =
 let main argv =
     let program : string = argv.[0]
     let validatedAST = runAndValidate program
+    printfn "Validated AST: %A" validatedAST
     validatedAST |> List.iter printASTNode
     printfn "%s" program
     printfn "%s" (createErrorIndicator (getAllErrorNodes validatedAST) (program.Length + 3))

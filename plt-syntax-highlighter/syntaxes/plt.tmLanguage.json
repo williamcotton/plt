@@ -1,0 +1,40 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "plt",
+	"scopeName": "source.plt",
+	"fileTypes": [
+		"plt"
+	],
+	"patterns": [
+		{
+			"name": "keyword.other.unit.plt",
+			"match": "\\bpx\\b"
+		},
+		{
+			"name": "constant.numeric.color.hex.plt",
+			"match": "#[0-9a-fA-F]{3,6}"
+		},
+		{
+			"name": "constant.other.color.plt",
+			"match": "\\b(red|blue|green|yellow|orange)\\b"
+		},
+		{
+			"name": "keyword.control.action.plt",
+			"match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b(?=\\s+[0-9]+px)"
+		},
+		{
+			"name": "constant.numeric.plt",
+			"match": "\\b\\d+px\\b"
+		},
+		{
+			"name": "punctuation.definition.tag.begin.plt",
+			"match": "\\{"
+		},
+		{
+			"name": "punctuation.definition.tag.end.plt",
+			"match": "\\}"
+		}
+	],
+	"repository": {},
+	"uuid": "plt-ya-you-know-me"
+}

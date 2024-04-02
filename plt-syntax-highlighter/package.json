@@ -1,0 +1,25 @@
+{
+  "name": "plt",
+  "displayName": "plt",
+  "description": "plt: csv to graphic",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "plt",
+      "aliases": ["plt", "plt"],
+      "extensions": [".plt"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "plt",
+      "scopeName": "source.plt",
+      "path": "./syntaxes/plt.tmLanguage.json"
+    }]
+  }
+}

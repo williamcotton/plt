@@ -2,6 +2,7 @@
 
 open FParsec
 open System
+open System.Text.RegularExpressions
 
 type ASTNode =
     | FieldsNode of string * Position * Position
@@ -96,14 +97,25 @@ let validateNodeWithParser parser (node: ASTNode) =
         match run parser content with
         | Success(_, _, _) -> node
         | Failure(msg, e, _) ->
+            let adjustedPos =
+                let backtrackPattern = @"Error in Ln: (\d+) Col: (\d+)"
+                let matches = Regex.Matches(msg, backtrackPattern)
+                if matches.Count > 1 then
+                    let lastMatch = matches.[matches.Count - 1]
+                    let line = Int64.Parse(lastMatch.Groups.[1].Value)
+                    let col = Int64.Parse(lastMatch.Groups.[2].Value)
+                    Position(startPos.StreamName, startPos.Index + col - 1L, line + startPos.Line - 1L, startPos.Column + col + 1L)
+                else
+                    Position(startPos.StreamName, startPos.Index + int64 e.Position.Column - 1L, startPos.Line, startPos.Column + int64 e.Position.Column - 1L)
+
             let errorDetail = msg.Trim().Split('\n') |> Array.last
-            let adjustedPos = Position(startPos.StreamName, startPos.Index + int64 e.Position.Column - 1L, startPos.Line, startPos.Column + int64 e.Position.Column - 1L)
-            ErrorNode(sprintf "%s - %s - %s" nodeType content msg, adjustedPos)
+            ErrorNode(sprintf "%s - %s - %s" nodeType content errorDetail, adjustedPos)
 
     match node with
     | ActionNode(content, startPos, endPos) -> parseNode content startPos endPos "Action"
     | FieldsNode(content, startPos, endPos) -> parseNode content startPos endPos "Fields"
     | _ -> node
+
 
 let actionValidatorParser =
     actionParser

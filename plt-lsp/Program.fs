@@ -4,8 +4,8 @@ open FParsec
 open System
 
 type ASTNode =
-    | FieldsNode of string * Position
-    | ActionNode of string * Position
+    | FieldsNode of string * Position * Position
+    | ActionNode of string * Position * Position
     | ErrorNode of string * Position
     | CommandNode of ASTNode list
     | EmptyNode
@@ -58,17 +58,19 @@ let actionParser =
 let openBrace = pstring "{" .>> spaces
 let closeBrace = spaces >>. pstring "}"
 
-let actionStringParser =
-    pipe2
-        (between openBrace closeBrace (manyCharsTill anyChar (lookAhead closeBrace)))
-        getPosition
-        (fun s pos -> ActionNode (s, pos))
-
 let fieldsStringParser =
-    pipe2
+    pipe3
         getPosition
         (manyCharsTill anyChar (lookAhead openBrace))
-        (fun pos s -> FieldsNode (s, pos))
+        getPosition
+        (fun startPos content endPos -> FieldsNode (content, startPos, endPos))
+
+let actionStringParser =
+    pipe3
+        getPosition
+        (between openBrace closeBrace (manyCharsTill anyChar (lookAhead closeBrace)))
+        getPosition
+        (fun startPos content endPos -> ActionNode (content, startPos, endPos))
 
 let errorParser =
     pipe2 getPosition (anyChar) (fun pos chars ->
@@ -90,17 +92,17 @@ let programStringParser =
     many combinedParser
 
 let validateNodeWithParser parser (node: ASTNode) =
-    let parseNode s pos nodeType =
-        match run parser s with
+    let parseNode content (startPos : Position) (endPos : Position) nodeType =
+        match run parser content with
         | Success(_, _, _) -> node
-        | Failure(msg, _, _) ->
+        | Failure(msg, e, _) ->
             let errorDetail = msg.Trim().Split('\n') |> Array.last
-            let stringDetail = msg.Trim().Split('\n') |> Array.tail |> Array.head
-            ErrorNode(sprintf "%s - %s - %s" nodeType stringDetail errorDetail, pos)
+            let adjustedPos = Position(startPos.StreamName, startPos.Index + int64 e.Position.Column - 1L, startPos.Line, startPos.Column + int64 e.Position.Column - 1L)
+            ErrorNode(sprintf "%s - %s - %s" nodeType content msg, adjustedPos)
 
     match node with
-    | ActionNode(s, pos) -> parseNode s pos "Action"
-    | FieldsNode(s, pos) -> parseNode s pos "Fields"
+    | ActionNode(content, startPos, endPos) -> parseNode content startPos endPos "Action"
+    | FieldsNode(content, startPos, endPos) -> parseNode content startPos endPos "Fields"
     | _ -> node
 
 let actionValidatorParser =
@@ -111,8 +113,8 @@ let fieldsValidatorParser =
 
 let rec validateASTNode node =
     match node with
-    | ActionNode(_, _) -> validateNodeWithParser actionValidatorParser node
-    | FieldsNode(_, _) -> validateNodeWithParser fieldsValidatorParser node
+    | ActionNode(_, _, _) -> validateNodeWithParser actionValidatorParser node
+    | FieldsNode(_, _, _) -> validateNodeWithParser fieldsValidatorParser node
     | ErrorNode(_, _) -> node
     | CommandNode(nodes) ->
         let validatedNodes = List.map validateASTNode nodes
@@ -133,8 +135,8 @@ let runAndValidate input =
 
 let rec printASTNode node =
     match node with
-    | FieldsNode(s, _) -> printfn "Fields: %s" s
-    | ActionNode(s, _) -> printfn "Action: %s" s
+    | FieldsNode(s, _, _) -> printfn "Fields: %s" s
+    | ActionNode(s, _, _) -> printfn "Action: %s" s
     | ErrorNode(e, p) -> printfn "Error: %s at %A" e p
     | CommandNode(nodes) ->
         printfn "Command:"

@@ -7,9 +7,11 @@ open System.Text.RegularExpressions
 type ASTNode =
     | FieldsNode of string * Position * Position
     | ActionNode of string * Position * Position
-    | ErrorNode of string * Position
+    | ErrorNode of string * Position * Position
     | CommandNode of ASTNode list
     | EmptyNode
+
+let placeholderPosition = Position("placeholder", 0, 0, 0)
 
 let stringContent = many1Chars (noneOf ",[]{} \t\r\n")
 let stringParser = spaces >>. stringContent .>> spaces
@@ -31,10 +33,15 @@ let hexColor =
     | 3 | 6 -> preturn ("#" + hexDigits)
     | _ -> fail "Invalid hex color"
 let colorParser =
-    choice [
-        pstring "red"; pstring "green"; pstring "blue"; pstring "yellow"; pstring "orange"; pstring "black";
-        hexColor
-    ]
+    choice
+        [ attempt (pstring "red" .>> notFollowedBy anyChar)
+          attempt (pstring "green" .>> notFollowedBy anyChar)
+          attempt (pstring "blue" .>> notFollowedBy anyChar)
+          attempt (pstring "yellow" .>> notFollowedBy anyChar)
+          attempt (pstring "orange" .>> notFollowedBy anyChar)
+          attempt (pstring "black" .>> notFollowedBy anyChar)
+          attempt hexColor ]
+    <?> "color (e.g., red, green, #123456)"
 
 let widthParser = many1Chars digit .>> pstring "px" |>> (fun digits -> digits + "px")
 
@@ -74,20 +81,25 @@ let actionStringParser =
         (fun startPos content endPos -> ActionNode (content, startPos, endPos))
 
 let errorParser =
-    pipe2 getPosition (anyChar) (fun pos chars ->
-        if String.IsNullOrWhiteSpace(String.Concat(chars)) then
-            EmptyNode
-        else
-            ErrorNode(String.Concat(chars), pos))
+    pipe3 
+        getPosition 
+        (manyCharsTill anyChar (lookAhead closeBrace))
+        getPosition 
+        (fun startPos chars endPos ->
+            if String.IsNullOrWhiteSpace(chars) then 
+                EmptyNode
+            else 
+                ErrorNode(chars, startPos, endPos)) // Use startPos to mark the beginning of the error
+
 let commandParser =
     pipe2 fieldsStringParser (opt actionStringParser)
         (fun p a -> CommandNode (p :: Option.toList a))
 
 let combinedParser =
     choice [
-        attempt commandParser;
+        attempt commandParser   
         errorParser
-    ]
+    ] .>> spaces
 
 let programStringParser =
     many combinedParser
@@ -109,7 +121,7 @@ let validateNodeWithParser parser (node: ASTNode) =
                     Position(startPos.StreamName, startPos.Index + int64 e.Position.Column - 1L, startPos.Line, startPos.Column + int64 e.Position.Column - 1L)
 
             let errorDetail = msg.Trim().Split('\n') |> Array.last
-            ErrorNode(sprintf "%s - %s - %s" nodeType content errorDetail, adjustedPos)
+            ErrorNode(sprintf "%s - %s - %s" nodeType content errorDetail, adjustedPos, endPos)
 
     match node with
     | ActionNode(content, startPos, endPos) -> parseNode content startPos endPos "Action"
@@ -127,7 +139,7 @@ let rec validateASTNode node =
     match node with
     | ActionNode(_, _, _) -> validateNodeWithParser actionValidatorParser node
     | FieldsNode(_, _, _) -> validateNodeWithParser fieldsValidatorParser node
-    | ErrorNode(_, _) -> node
+    | ErrorNode(_, _, _) -> node
     | CommandNode(nodes) ->
         let validatedNodes = List.map validateASTNode nodes
         CommandNode(validatedNodes)
@@ -136,20 +148,19 @@ let rec validateASTNode node =
 let validateAST ast =
     List.map validateASTNode ast
 
-let placeholderPosition = Position("placeholder", 0, 0, 0)
-
 let runAndValidate input =
     match run programStringParser input with
     | Success(result, _, _) ->
+        printfn "Program String Parser result: %A" result
         validateAST result
     | Failure(errorMsg, _, _) ->
-        [ErrorNode ("Parsing error: " + errorMsg, placeholderPosition)]
+        [ErrorNode ("Parsing error: " + errorMsg, placeholderPosition, placeholderPosition)]
 
 let rec printASTNode node =
     match node with
     | FieldsNode(s, _, _) -> printfn "Fields: %s" s
     | ActionNode(s, _, _) -> printfn "Action: %s" s
-    | ErrorNode(e, p) -> printfn "Error: %s at %A" e p
+    | ErrorNode(e, p, _) -> printfn "Error: %s at %A" e p
     | CommandNode(nodes) ->
         printfn "Command:"
         nodes |> List.iter printASTNode
@@ -158,7 +169,7 @@ let rec printASTNode node =
 
 let rec collectErrorNodes astNode =
     match astNode with
-    | ErrorNode(_, _) -> [astNode]
+    | ErrorNode(_, _, _) -> [astNode]
     | CommandNode(nodes) -> List.collect collectErrorNodes nodes
     | _ -> []
 
@@ -172,7 +183,7 @@ let createErrorIndicator (errorNodes: ASTNode list) programLength =
     // Function to update the indicator array based on the position in an ErrorNode
     let updateIndicator (node: ASTNode) =
         match node with
-        | ErrorNode(_, pos) ->
+        | ErrorNode(_, pos, _) ->
             let column = int pos.Column
             let index = column - 1 // Convert 1-based column number to 0-based array index
 

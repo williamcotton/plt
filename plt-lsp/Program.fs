@@ -116,7 +116,7 @@ let validateNodeWithParser parser (node: ASTNode) =
                     let lastMatch = matches.[matches.Count - 1]
                     let line = Int64.Parse(lastMatch.Groups.[1].Value)
                     let col = Int64.Parse(lastMatch.Groups.[2].Value)
-                    Position(startPos.StreamName, startPos.Index + col - 1L, line + startPos.Line - 1L, startPos.Column + col + 1L)
+                    Position(startPos.StreamName, startPos.Index + col - 1L, line + startPos.Line - 1L, startPos.Column + col)
                 else
                     Position(startPos.StreamName, startPos.Index + int64 e.Position.Column - 1L, startPos.Line, startPos.Column + int64 e.Position.Column - 1L)
 
@@ -151,16 +151,15 @@ let validateAST ast =
 let runAndValidate input =
     match run programStringParser input with
     | Success(result, _, _) ->
-        printfn "Program String Parser result: %A" result
         validateAST result
-    | Failure(errorMsg, _, _) ->
-        [ErrorNode ("Parsing error: " + errorMsg, placeholderPosition, placeholderPosition)]
+    | Failure(errorMsg, e, _) ->
+        [ErrorNode ("Parsing error: " + (errorMsg.Trim().Split('\n') |> Array.last), e.Position, e.Position)]
 
 let rec printASTNode node =
     match node with
     | FieldsNode(s, _, _) -> printfn "Fields: %s" s
     | ActionNode(s, _, _) -> printfn "Action: %s" s
-    | ErrorNode(e, p, _) -> printfn "Error: %s at %A" e p
+    | ErrorNode(e, startPos, endPos) -> printfn "Error: %s at %A %A" e startPos endPos
     | CommandNode(nodes) ->
         printfn "Command:"
         nodes |> List.iter printASTNode
@@ -201,7 +200,7 @@ let createErrorIndicator (errorNodes: ASTNode list) programLength =
 let main argv =
     let program : string = argv.[0]
     let validatedAST = runAndValidate program
-    printfn "Validated AST: %A" validatedAST
+    // printfn "Validated AST: %A" validatedAST
     validatedAST |> List.iter printASTNode
     printfn "%s" program
     printfn "%s" (createErrorIndicator (getAllErrorNodes validatedAST) (program.Length + 3))

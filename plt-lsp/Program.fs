@@ -75,10 +75,10 @@ let fieldsStringParser =
 
 let actionStringParser =
     pipe3
-        getPosition
-        (between openBrace closeBrace (manyCharsTill anyChar (lookAhead closeBrace)))
-        getPosition
-        (fun startPos content endPos -> ActionNode (content, startPos, endPos))
+        (openBrace >>. spaces >>. getPosition)
+        (manyTill anyChar (lookAhead closeBrace))
+        (getPosition .>> spaces .>> closeBrace)
+        (fun startPos content endPos -> ActionNode (String(Array.ofList content), startPos, endPos))
 
 let errorParser =
     pipe3 
@@ -109,19 +109,19 @@ let validateNodeWithParser parser (node: ASTNode) =
         match run parser content with
         | Success(_, _, _) -> node
         | Failure(msg, e, _) ->
-            let adjustedPos =
+            let adjustedStartPos =
                 let backtrackPattern = @"Error in Ln: (\d+) Col: (\d+)"
                 let matches = Regex.Matches(msg, backtrackPattern)
                 if matches.Count > 1 then
                     let lastMatch = matches.[matches.Count - 1]
                     let line = Int64.Parse(lastMatch.Groups.[1].Value)
                     let col = Int64.Parse(lastMatch.Groups.[2].Value)
-                    Position(startPos.StreamName, startPos.Index + col - 1L, line + startPos.Line - 1L, startPos.Column + col)
+                    Position(startPos.StreamName, startPos.Index + col, line + startPos.Line - 1L, startPos.Column + col - 1L)
                 else
                     Position(startPos.StreamName, startPos.Index + int64 e.Position.Column - 1L, startPos.Line, startPos.Column + int64 e.Position.Column - 1L)
 
             let errorDetail = msg.Trim().Split('\n') |> Array.last
-            ErrorNode(sprintf "%s - %s - %s" nodeType content errorDetail, adjustedPos, endPos)
+            ErrorNode(sprintf "%s - %s - %s" nodeType content errorDetail, adjustedStartPos, endPos)
 
     match node with
     | ActionNode(content, startPos, endPos) -> parseNode content startPos endPos "Action"

@@ -176,25 +176,25 @@ let tests =
 
         testList "styleParser Tests" [
             testCase "styleParser with '100px solid #123456'" <| fun () ->
-                Expect.isTrue (testParser styleParser "100px solid #123456" ("100px", [("solid", "#123456")])) "styleParser should parse '100px solid #123456'"
+                Expect.isTrue (testParser styleParser "100px solid #123456" ("100px", "solid #123456")) "styleParser should parse '100px solid #123456'"
 
             testCase "styleParser with '50px dashed red'" <| fun () ->
-                Expect.isTrue (testParser styleParser "50px dashed red" ("50px", [("dashed", "red")])) "styleParser should parse '50px dashed red'"
+                Expect.isTrue (testParser styleParser "50px dashed red" ("50px", "dashed red")) "styleParser should parse '50px dashed red'"
 
             testCase "styleParser with '10px dotted #123'" <| fun () ->
-                Expect.isTrue (testParser styleParser "10px dotted #123" ("10px", [("dotted", "#123")])) "styleParser should parse '10px dotted #123'"
+                Expect.isTrue (testParser styleParser "10px dotted #123" ("10px", "dotted #123")) "styleParser should parse '10px dotted #123'"
 
             testCase "styleParser with trailing characters '10px dotted #123    { '" <| fun () ->
-                Expect.isTrue (testParser styleParser "10px dotted #123    {" ("10px", [("dotted", "#123")])) "styleParser should parse '10px dotted #123    {'"
+                Expect.isTrue (testParser styleParser "10px dotted #123    {" ("10px", "dotted #123")) "styleParser should parse '10px dotted #123    {'"
 
             testCase "styleParser with invalid drawStyle '10px sdfsdf #123456'" <| fun () ->
-                Expect.isFalse (testParser styleParser "10px sdfsdf #123456" ("10px", [("sdfsdf", "#123456")])) "styleParser should fail on '10px sdfsdf #123456'"
+                Expect.isFalse (testParser styleParser "10px sdfsdf #123456" ("10px", "sdfsdf #123456")) "styleParser should fail on '10px sdfsdf #123456'"
 
             testCase "styleParser with invalid width 'sdf sdfsdf #123456'" <| fun () ->
-                Expect.isFalse (testParser styleParser "sdf sdfsdf #123456" ("sdf", [("sdfsdf", "#123456")])) "styleParser should fail on 'sdf sdfsdf #123456'"
+                Expect.isFalse (testParser styleParser "sdf sdfsdf #123456" ("sdf", "sdfsdf #123456")) "styleParser should fail on 'sdf sdfsdf #123456'"
 
             testCase "styleParser with invalid color '10px dotted #1234'" <| fun () ->
-                Expect.isFalse (testParser styleParser "10px dotted #1234" ("10px", [("dotted", "#1234")])) "styleParser should fail on '10px dotted #1234'"
+                Expect.isFalse (testParser styleParser "10px dotted #1234" ("10px", "dotted #1234")) "styleParser should fail on '10px dotted #1234'"
         ]
 
         testList "multiStyleParser Tests" [

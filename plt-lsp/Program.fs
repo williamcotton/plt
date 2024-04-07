@@ -4,11 +4,11 @@ open FParsec
 open System
 open System.Text.RegularExpressions
 
-type ASTNode =
+type IntermediaryASTNode =
     | FieldsNode of string * Position * Position
     | ActionNode of string * Position * Position
     | ErrorNode of string * Position * Position
-    | CommandNode of ASTNode list
+    | CommandNode of IntermediaryASTNode list
     | EmptyNode
 
 let placeholderPosition = Position("placeholder", 0, 0, 0)
@@ -104,7 +104,7 @@ let combinedParser =
 let programStringParser =
     many combinedParser
 
-let validateNodeWithParser parser (node: ASTNode) =
+let validateNodeWithParser parser node =
     let parseNode content (startPos : Position) (endPos : Position) nodeType =
         match run parser content with
         | Success(_, _, _) -> node
@@ -175,12 +175,12 @@ let rec collectErrorNodes astNode =
 let getAllErrorNodes ast =
     List.collect collectErrorNodes ast
 
-let createErrorIndicator (errorNodes: ASTNode list) programLength =
+let createErrorIndicator errorNodes programLength =
     // Initialize a string of whitespace with the length of the program
     let indicatorArray = Array.create programLength ' '
 
     // Function to update the indicator array based on the position in an ErrorNode
-    let updateIndicator (node: ASTNode) =
+    let updateIndicator node =
         match node with
         | ErrorNode(_, pos, _) ->
             let column = int pos.Column

@@ -13,6 +13,7 @@
   <ItemGroup>
     <PackageReference Include="Expecto" Version="10.1.0" />
     <PackageReference Include="FParsec" Version="1.1.1" />
+    <PackageReference Include="OmniSharp.Extensions.LanguageServer" Version="0.19.9" />
   </ItemGroup>
 
 </Project>

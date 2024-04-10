@@ -1,0 +1,1 @@
+one, two { plot 1px solid red }

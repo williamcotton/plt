@@ -9,14 +9,14 @@ import {
   TransportKind,
 } from "vscode-languageclient/node";
 
+let client: LanguageClient;
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
   // The server is implemented in an external executable (your language server)
-  const serverExecutablePath = "path/to/your/language/server/executable";
-
-  // If your server is a Node.js project, use this:
-  // const serverModule = context.asAbsolutePath(path.join('server', 'out', 'server.js'));
+  const serverExecutablePath =
+    "/Users/williamcotton/Projects/plt/plt-lsp/bin/Debug/net8.0/plt-lsp";
 
   // Server options define how to start and communicate with the server
   const serverOptions: ServerOptions = {
@@ -33,16 +33,20 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   // Create the language client and start it
-  const client = new LanguageClient(
+  client = new LanguageClient(
     "pltLanguageClient", // This can be any name for the client
     "PLT Language Server", // This is the name that will appear in the UI
     serverOptions,
     clientOptions
   );
 
-  // Start the client and push the disposable to the context's subscriptions
-  context.subscriptions.push(client.start());
+  client.start();
 }
 
 // This method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate(): Thenable<void> | undefined {
+  if (!client) {
+    return undefined;
+  }
+  return client.stop();
+}

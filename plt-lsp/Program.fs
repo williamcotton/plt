@@ -68,17 +68,17 @@ let closeBrace = spaces >>. pstring "}"
 
 let fieldsStringParser =
     pipe3
-        getPosition
-        (manyCharsTill anyChar (lookAhead openBrace))
-        getPosition
+        (spaces >>. getPosition)
+        (manyCharsTill anyChar (lookAhead (spaces .>> openBrace)))
+        (getPosition .>> spaces)
         (fun startPos content endPos -> FieldsNode (content, startPos, endPos))
 
 let actionStringParser =
     pipe3
         (openBrace >>. spaces >>. getPosition)
-        (manyTill anyChar (lookAhead closeBrace))
+        (manyCharsTill anyChar (lookAhead (spaces .>> closeBrace)))
         (getPosition .>> spaces .>> closeBrace)
-        (fun startPos content endPos -> ActionNode (String(Array.ofList content), startPos, endPos))
+        (fun startPos content endPos -> ActionNode (content, startPos, endPos))
 
 let errorParser =
     pipe3 
@@ -105,23 +105,26 @@ let programStringParser =
     many combinedParser
 
 let validateNodeWithParser parser node =
+    let calculatePosition msg (e : ParserError) (startPos : Position) =
+        let backtrackPattern = @"Error in Ln: (\d+) Col: (\d+)"
+        let matches = Regex.Matches(msg, backtrackPattern)
+        if matches.Count > 1 then
+            let lastMatch = matches.[matches.Count - 1]
+            let line = Int64.Parse(lastMatch.Groups.[1].Value)
+            let col = Int64.Parse(lastMatch.Groups.[2].Value)
+            (startPos.Index + col, line + startPos.Line - 1L, startPos.Column + col - 1L)
+        else
+            (startPos.Index + int64 e.Position.Column - 1L, startPos.Line, startPos.Column + int64 e.Position.Column - 1L)
+
     let parseNode content (startPos : Position) (endPos : Position) nodeType =
         match run parser content with
         | Success(_, _, _) -> node
         | Failure(msg, e, _) ->
-            let adjustedStartPos =
-                let backtrackPattern = @"Error in Ln: (\d+) Col: (\d+)"
-                let matches = Regex.Matches(msg, backtrackPattern)
-                if matches.Count > 1 then
-                    let lastMatch = matches.[matches.Count - 1]
-                    let line = Int64.Parse(lastMatch.Groups.[1].Value)
-                    let col = Int64.Parse(lastMatch.Groups.[2].Value)
-                    Position(startPos.StreamName, startPos.Index + col, line + startPos.Line - 1L, startPos.Column + col - 1L)
-                else
-                    Position(startPos.StreamName, startPos.Index + int64 e.Position.Column - 1L, startPos.Line, startPos.Column + int64 e.Position.Column - 1L)
-
+            let (index, line, column) = calculatePosition msg e startPos
+            let adjustedStartPos = Position(startPos.StreamName, index, line, column)
+            let adjustedEndPos = Position(endPos.StreamName, endPos.Index, endPos.Line, endPos.Column - 1L)
             let errorDetail = msg.Trim().Split('\n') |> Array.last
-            ErrorNode(sprintf "%s - %s - %s" nodeType content errorDetail, adjustedStartPos, endPos)
+            ErrorNode(sprintf "%s - %s - %s" nodeType content errorDetail, adjustedStartPos, adjustedEndPos)
 
     match node with
     | ActionNode(content, startPos, endPos) -> parseNode content startPos endPos "Action"

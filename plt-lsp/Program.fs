@@ -5,11 +5,11 @@ open System
 open System.Text.RegularExpressions
 
 type IntermediaryASTNode =
-    | FieldsNode of string * Position * Position
-    | ActionNode of string * Position * Position
-    | ErrorNode of string * Position * Position
-    | CommandNode of IntermediaryASTNode list
-    | EmptyNode
+    | IntermediaryFieldsNode of string * Position * Position
+    | IntermediaryActionNode of string * Position * Position
+    | IntermediaryErrorNode of string * Position * Position
+    | IntermediaryCommandNode of IntermediaryASTNode list
+    | IntermediaryEmptyNode
 
 let placeholderPosition = Position("placeholder", 0, 0, 0)
 
@@ -66,45 +66,45 @@ let actionParser =
 let openBrace = pstring "{" .>> spaces
 let closeBrace = spaces >>. pstring "}"
 
-let fieldsStringParser =
+let intermediaryFieldsStringParser =
     pipe3
         (spaces >>. getPosition)
         (manyCharsTill anyChar (lookAhead (spaces .>> openBrace)))
         (getPosition .>> spaces)
-        (fun startPos content endPos -> FieldsNode (content, startPos, endPos))
+        (fun startPos content endPos -> IntermediaryFieldsNode (content, startPos, endPos))
 
-let actionStringParser =
+let intermediaryActionStringParser =
     pipe3
         (openBrace >>. spaces >>. getPosition)
         (manyCharsTill anyChar (lookAhead (spaces .>> closeBrace)))
         (getPosition .>> spaces .>> closeBrace)
-        (fun startPos content endPos -> ActionNode (content, startPos, endPos))
+        (fun startPos content endPos -> IntermediaryActionNode (content, startPos, endPos))
 
 let errorParser =
     pipe3 
-        getPosition 
+        (spaces >>. getPosition)
         (manyCharsTill anyChar (lookAhead closeBrace))
-        getPosition 
+        (getPosition .>> spaces .>> closeBrace)
         (fun startPos chars endPos ->
             if String.IsNullOrWhiteSpace(chars) then 
-                EmptyNode
+                IntermediaryEmptyNode
             else 
-                ErrorNode(chars, startPos, endPos)) // Use startPos to mark the beginning of the error
+                IntermediaryErrorNode(chars, startPos, endPos)) // Use startPos to mark the beginning of the error
 
-let commandParser =
-    pipe2 fieldsStringParser (opt actionStringParser)
-        (fun p a -> CommandNode (p :: Option.toList a))
+let intermediaryCommandParser =
+    pipe2 intermediaryFieldsStringParser (opt intermediaryActionStringParser)
+        (fun p a -> IntermediaryCommandNode (p :: Option.toList a))
 
-let combinedParser =
+let intermediaryCommandErrorParser =
     choice [
-        attempt commandParser   
+        attempt intermediaryCommandParser   
         errorParser
     ] .>> spaces
 
-let programStringParser =
-    many combinedParser
+let intermediaryProgramParser =
+    many intermediaryCommandErrorParser
 
-let validateNodeWithParser parser node =
+let validateIntermediaryNodeWithParser parser node =
     let calculatePosition msg (e : ParserError) (startPos : Position) =
         let backtrackPattern = @"Error in Ln: (\d+) Col: (\d+)"
         let matches = Regex.Matches(msg, backtrackPattern)
@@ -124,11 +124,11 @@ let validateNodeWithParser parser node =
             let adjustedStartPos = Position(startPos.StreamName, index, line, column)
             let adjustedEndPos = Position(endPos.StreamName, endPos.Index, endPos.Line, endPos.Column - 1L)
             let errorDetail = msg.Trim().Split('\n') |> Array.last
-            ErrorNode(sprintf "%s - %s - %s" nodeType content errorDetail, adjustedStartPos, adjustedEndPos)
+            IntermediaryErrorNode(sprintf "%s - %s - %s" nodeType content errorDetail, adjustedStartPos, adjustedEndPos)
 
     match node with
-    | ActionNode(content, startPos, endPos) -> parseNode content startPos endPos "Action"
-    | FieldsNode(content, startPos, endPos) -> parseNode content startPos endPos "Fields"
+    | IntermediaryActionNode(content, startPos, endPos) -> parseNode content startPos endPos "Action"
+    | IntermediaryFieldsNode(content, startPos, endPos) -> parseNode content startPos endPos "Fields"
     | _ -> node
 
 
@@ -138,73 +138,49 @@ let actionValidatorParser =
 let fieldsValidatorParser =
     fieldsParser
 
-let rec validateASTNode node =
+let rec validateIntermediaryASTNode node =
     match node with
-    | ActionNode(_, _, _) -> validateNodeWithParser actionValidatorParser node
-    | FieldsNode(_, _, _) -> validateNodeWithParser fieldsValidatorParser node
-    | ErrorNode(_, _, _) -> node
-    | CommandNode(nodes) ->
-        let validatedNodes = List.map validateASTNode nodes
-        CommandNode(validatedNodes)
-    | EmptyNode -> node
+    | IntermediaryActionNode(_, _, _) -> validateIntermediaryNodeWithParser actionValidatorParser node
+    | IntermediaryFieldsNode(_, _, _) -> validateIntermediaryNodeWithParser fieldsValidatorParser node
+    | IntermediaryErrorNode(_, _, _) -> node
+    | IntermediaryCommandNode(nodes) ->
+        let validatedNodes = List.map validateIntermediaryASTNode nodes
+        IntermediaryCommandNode(validatedNodes)
+    | IntermediaryEmptyNode -> node
 
-let validateAST ast =
-    List.map validateASTNode ast
+let validateIntermediaryAST ast =
+    List.map validateIntermediaryASTNode ast
 
 let runAndValidate input =
-    match run programStringParser input with
+    match run intermediaryProgramParser input with
     | Success(result, _, _) ->
-        validateAST result
+        validateIntermediaryAST result
     | Failure(errorMsg, e, _) ->
-        [ErrorNode ("Parsing error: " + (errorMsg.Trim().Split('\n') |> Array.last), e.Position, e.Position)]
+        [IntermediaryErrorNode ("Parsing error: " + (errorMsg.Trim().Split('\n') |> Array.last), e.Position, e.Position)]
 
 let rec printASTNode node =
     match node with
-    | FieldsNode(s, _, _) -> printfn "Fields: %s" s
-    | ActionNode(s, _, _) -> printfn "Action: %s" s
-    | ErrorNode(e, startPos, endPos) -> printfn "Error: %s at %A %A" e startPos endPos
-    | CommandNode(nodes) ->
+    | IntermediaryFieldsNode(s, _, _) -> printfn "Fields: %s" s
+    | IntermediaryActionNode(s, _, _) -> printfn "Action: %s" s
+    | IntermediaryErrorNode(e, startPos, endPos) -> printfn "Error: %s at %A %A" e startPos endPos
+    | IntermediaryCommandNode(nodes) ->
         printfn "Command:"
         nodes |> List.iter printASTNode
-    | EmptyNode -> ignore()
+    | IntermediaryEmptyNode -> ignore()
     
 
 let rec collectErrorNodes astNode =
     match astNode with
-    | ErrorNode(_, _, _) -> [astNode]
-    | CommandNode(nodes) -> List.collect collectErrorNodes nodes
+    | IntermediaryErrorNode(_, _, _) -> [astNode]
+    | IntermediaryCommandNode(nodes) -> List.collect collectErrorNodes nodes
     | _ -> []
 
 let getAllErrorNodes ast =
     List.collect collectErrorNodes ast
 
-let createErrorIndicator errorNodes programLength =
-    // Initialize a string of whitespace with the length of the program
-    let indicatorArray = Array.create programLength ' '
-
-    // Function to update the indicator array based on the position in an ErrorNode
-    let updateIndicator node =
-        match node with
-        | ErrorNode(_, pos, _) ->
-            let column = int pos.Column
-            let index = column - 1 // Convert 1-based column number to 0-based array index
-
-            if index >= 0 && index < Array.length indicatorArray then
-                indicatorArray.[index] <- '-'
-        | _ -> () // Ignore non-error nodes
-
-    // Update the indicator array for each error node
-    errorNodes |> List.iter updateIndicator
-
-    // Convert the indicator array back to a string
-    new string (indicatorArray)
-
 [<EntryPoint>]
 let main argv =
     let program : string = argv.[0]
     let validatedAST = runAndValidate program
-    // printfn "Validated AST: %A" validatedAST
     validatedAST |> List.iter printASTNode
-    printfn "%s" program
-    printfn "%s" (createErrorIndicator (getAllErrorNodes validatedAST) (program.Length + 3))
     0                                               

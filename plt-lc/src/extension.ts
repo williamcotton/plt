@@ -7,6 +7,7 @@ import {
   LanguageClientOptions,
   ServerOptions,
   TransportKind,
+  TextDocumentSyncKind,
 } from "vscode-languageclient/node";
 
 let client: LanguageClient;
@@ -30,6 +31,7 @@ export function activate(context: vscode.ExtensionContext) {
     synchronize: {
       fileEvents: vscode.workspace.createFileSystemWatcher("**/*.plt"), // Replace '*.plt' with your file extension
     },
+    
   };
 
   // Create the language client and start it

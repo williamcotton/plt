@@ -9,16 +9,29 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:plt"
+  ],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": [
+    "languages": [
       {
-        "command": "plt.helloWorld",
-        "title": "Hello World"
+        "id": "plt",
+        "extensions": [
+          ".plt"
+        ],
+        "name": "PLT Language",
+        "configuration": "./language-configuration.json"
       }
     ]
   },
+  "grammars": [
+    {
+      "language": "plt",
+      "scopeName": "source.plt",
+      "path": "./src/plt.tmLanguage.json"
+    }
+  ],
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",

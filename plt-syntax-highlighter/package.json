@@ -1,7 +1,7 @@
 {
-  "name": "plt",
-  "displayName": "plt",
-  "description": "plt: csv to graphic",
+  "name": "plt2",
+  "displayName": "plt2",
+  "description": "plt2: csv to graphic",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.85.0"
@@ -11,15 +11,15 @@
   ],
   "contributes": {
     "languages": [{
-      "id": "plt",
-      "aliases": ["plt", "plt"],
-      "extensions": [".plt"],
+      "id": "plt2",
+      "aliases": ["plt2", "plt2"],
+      "extensions": [".plt2"],
       "configuration": "./language-configuration.json"
     }],
     "grammars": [{
-      "language": "plt",
-      "scopeName": "source.plt",
-      "path": "./syntaxes/plt.tmLanguage.json"
+      "language": "plt2",
+      "scopeName": "source.plt2",
+      "path": "./syntaxes/plt2.tmLanguage.json"
     }]
   }
 }

@@ -11,4 +11,4 @@ let (<!>) (p: Parser<_, _>) label : Parser<_, _> =
 
 let printErrors (errorMsgs: (string * ParserError) list) =        
     for msg, _ in List.rev errorMsgs do
-        printfn "%s" msg       
+        printfn "%s" msg

@@ -2,7 +2,7 @@
 
 open Expecto
 open FParsec
-open plt.main
+open plt.parser
 
 let testParser (p: Parser<_,_>) input expected =
     match run p input with
@@ -199,66 +199,66 @@ let tests =
 
         testList "multiStyleParser Tests" [
             testCase "multiStyleParser with '100px [solid #123456, dotted #ff0000, dashed green]'" <| fun () ->
-                Expect.isTrue (testParser multiStyleParser "100px [solid #123456, dotted #ff0000, dashed green]" ("100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])) "multiStyleParser should parse '100px [solid #123456, dotted #ff0000, dashed green]'"
+                Expect.isTrue (testParser multiStyleParser "100px [solid #123456, dotted #ff0000, dashed green]" ([("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])) "multiStyleParser should parse '100px [solid #123456, dotted #ff0000, dashed green]'"
 
             testCase "multiStyleParser with '50px [dashed blue]'" <| fun () ->
-                Expect.isTrue (testParser multiStyleParser "50px [dashed blue]" ("50px", [("dashed", "blue")])) "multiStyleParser should parse '50px [dashed blue]'"
+                Expect.isTrue (testParser multiStyleParser "50px [dashed blue]" ([("dashed", "blue")])) "multiStyleParser should parse '50px [dashed blue]'"
 
             testCase "multiStyleParser with '20px [solid #123, dashed #abc, dotted yellow]'" <| fun () ->
-                Expect.isTrue (testParser multiStyleParser "20px [solid #123, dashed #abc, dotted yellow]" ("20px", [("solid", "#123"); ("dashed", "#abc"); ("dotted", "yellow")])) "multiStyleParser should parse '20px [solid #123, dashed #abc, dotted yellow]'"
+                Expect.isTrue (testParser multiStyleParser "20px [solid #123, dashed #abc, dotted yellow]" ([("solid", "#123"); ("dashed", "#abc"); ("dotted", "yellow")])) "multiStyleParser should parse '20px [solid #123, dashed #abc, dotted yellow]'"
 
             testCase "multiStyleParser with '100px [solid #123456]'" <| fun () ->
-                Expect.isTrue (testParser multiStyleParser "100px [solid #123456]" ("100px", [("solid", "#123456")])) "multiStyleParser should parse '100px [solid #123456]'"
+                Expect.isTrue (testParser multiStyleParser "100px [solid #123456]" ([("solid", "#123456")])) "multiStyleParser should parse '100px [solid #123456]'"
 
             testCase "multiStyleParser with incomplete input '100px solid #123456, dotted]'" <| fun () ->
-                Expect.isFalse (testParser multiStyleParser "100px solid #123456, dotted]" ("100px", [("solid", "#123456"); ("dotted", "")])) "multiStyleParser should fail on '100px solid #123456, dotted]'"
+                Expect.isFalse (testParser multiStyleParser "100px solid #123456, dotted]" ([("solid", "#123456"); ("dotted", "")])) "multiStyleParser should fail on '100px solid #123456, dotted]'"
         ]
 
         testList "actionParser Tests" [
             testCase "actionParser with 'plot 100px solid #123456'" <| fun () ->
-                Expect.isTrue (testParser actionParser "plot 100px solid #123456" ("plot", "100px", [("solid", "#123456")])) "actionParser should parse 'plot 100px solid #123456'"
+                Expect.isTrue (testParser intermediaryActionStringParser "plot 100px solid #123456" (IntermediaryActionNode ("", Position("", 0 ,0 ,0), Position("", 0 ,0 ,0)))) "actionParser should parse 'plot 100px solid #123456'"
 
             testCase "actionParser with 'bar 100px solid #123456'" <| fun () ->
-                Expect.isTrue (testParser actionParser "bar 100px solid #123456" ("bar", "100px", [("solid", "#123456")])) "actionParser should parse 'bar 100px solid #123456'"
+                Expect.isTrue (testParser intermediaryActionStringParser "bar 100px solid #123456" (IntermediaryActionNode ("", Position("", 0 ,0 ,0), Position("", 0 ,0 ,0)))) "actionParser should parse 'bar 100px solid #123456'"
 
             testCase "actionParser with 'stackbar 100px [solid #123456, dotted #ff0000, dashed green]'" <| fun () ->
-                Expect.isTrue (testParser actionParser "stackbar 100px [solid #123456, dotted #ff0000, dashed green]" ("stackbar", "100px", [("solid", "#123456"); ("dotted", "#ff0000"); ("dashed", "green")])) "actionParser should parse 'stackbar 100px [solid #123456, dotted #ff0000, dashed green]'"
+                Expect.isTrue (testParser intermediaryActionStringParser "stackbar 100px [solid #123456, dotted #ff0000, dashed green]" (IntermediaryActionNode ("", Position("", 0 ,0 ,0), Position("", 0 ,0 ,0)))) "actionParser should parse 'stackbar 100px [solid #123456, dotted #ff0000, dashed green]'"
 
             testCase "actionParser with 'plugin 100px solid #123456'" <| fun () ->
-                Expect.isTrue (testParser actionParser "plugin 100px solid #123456" ("plugin", "100px", [("solid", "#123456")])) "actionParser should parse 'plugin 100px solid #123456'"
+                Expect.isTrue (testParser intermediaryActionStringParser "plugin 100px solid #123456" (IntermediaryActionNode ("", Position("", 0 ,0 ,0), Position("", 0 ,0 ,0)))) "actionParser should parse 'plugin 100px solid #123456'"
 
             testCase "actionParser with 'plotplug 100px solid #123456'" <| fun () ->
-                Expect.isTrue (testParser actionParser "plotplug 100px solid #123456" ("plotplug", "100px", [("solid", "#123456")])) "actionParser should parse 'plotplug 100px solid #123456'"
+                Expect.isTrue (testParser intermediaryActionStringParser "plotplug 100px solid #123456" (IntermediaryActionNode ("", Position("", 0 ,0 ,0), Position("", 0 ,0 ,0)))) "actionParser should parse 'plotplug 100px solid #123456'"
         ]
 
-        testList "commandParser Tests" [
-            testCase "commandParser with 'y, x { plot 100px solid #123456 }'" <| fun () ->
-                Expect.isTrue (testParser commandParser "y, x { plot 100px solid #123456 }" 
-                    (CommandNode [
-                            FieldsNode ("", Position("", 0 ,0 ,0)); 
-                            ActionNode ("", Position("", 0 ,0 ,0))
+        testList "intermediaryCommandParser Tests" [
+            testCase "intermediaryCommandParser with 'y, x { plot 100px solid #123456 }'" <| fun () ->
+                Expect.isTrue (testParser intermediaryCommandParser "y, x { plot 100px solid #123456 }" 
+                    (IntermediaryCommandNode [
+                            IntermediaryFieldsNode ("", Position("", 0 ,0 ,0), Position("", 0 ,0 ,0)); 
+                            IntermediaryActionNode ("", Position("", 0 ,0 ,0), Position("", 0 ,0 ,0))
                         ])) 
-                    "commandParser should parse 'y, x { plot 100px solid #123456 }'"
+                    "intermediaryCommandParser should parse 'y, x { plot 100px solid #123456 }'"
 
-            testCase "commandParser with 'y,x{plot 100px solid #123456}'" <| fun () ->
-                Expect.isTrue (testParser commandParser "y,x{plot 100px solid #123456}" (CommandNode [])) "commandParser should parse 'y,x{plot 100px solid #123456}'"
+            testCase "intermediaryCommandParser with 'y,x{plot 100px solid #123456}'" <| fun () ->
+                Expect.isTrue (testParser intermediaryCommandParser "y,x{plot 100px solid #123456}" (IntermediaryCommandNode [])) "commandParser should parse 'y,x{plot 100px solid #123456}'"
 
-            testCase "commandParser with spaces '   y   ,  x   {    plot    100px    solid    #123456    }    '" <| fun () ->
-                Expect.isTrue (testParser commandParser "   y   ,  x   {    plot    100px    solid    #123456    }    " (CommandNode [])) "commandParser should parse '   y   ,  x   {    plot    100px    solid    #123456    }    '"
+            testCase "intermediaryCommandParser with spaces '   y   ,  x   {    plot    100px    solid    #123456    }    '" <| fun () ->
+                Expect.isTrue (testParser intermediaryCommandParser "   y   ,  x   {    plot    100px    solid    #123456    }    " (IntermediaryCommandNode [])) "commandParser should parse '   y   ,  x   {    plot    100px    solid    #123456    }    '"
         ]
 
-        testList "programParser Tests" [
-            testCase "programParser with simple commands" <| fun () ->
-                let expected = [CommandNode []]
-                Expect.isTrue (testParser programStringParser "y, x { plot 100px solid #123456 } x, y { bar 10px solid red }" expected) "programParser should parse simple commands"
+        testList "intermediaryProgramParser Tests" [
+            testCase "intermediaryProgramParser with simple commands" <| fun () ->
+                let expected = [IntermediaryCommandNode []]
+                Expect.isTrue (testParser intermediaryProgramParser "y, x { plot 100px solid #123456 } x, y { bar 10px solid red }" expected) "programParser should parse simple commands"
 
-            testCase "programParser with multiple field commands" <| fun () ->
-                let expected = [ CommandNode [] ]
-                Expect.isTrue (testParser programStringParser "y, x { plot 100px solid #123456 } [x1, x2], y { plugin 10px solid red }" expected) "programParser should parse multiple field commands"
+            testCase "intermediaryProgramParser with multiple field commands" <| fun () ->
+                let expected = [ IntermediaryCommandNode [] ]
+                Expect.isTrue (testParser intermediaryProgramParser "y, x { plot 100px solid #123456 } [x1, x2], y { plugin 10px solid red }" expected) "programParser should parse multiple field commands"
 
-            testCase "programParser with complex multi-command input" <| fun () ->
-                let expected = [ CommandNode [] ]
-                Expect.isTrue (testParser programStringParser "
+            testCase "intermediaryProgramParser with complex multi-command input" <| fun () ->
+                let expected = [ IntermediaryCommandNode [] ]
+                Expect.isTrue (testParser intermediaryProgramParser "
                     one, date {
                     bug 10px dashed red
                     }
@@ -280,8 +280,8 @@ let tests =
                     " expected) "programParser should parse complex multi-command input"
 
             testCase "programParser with extensive commands and new actions" <| fun () ->
-                let expected = [ CommandNode [] ]
-                Expect.isTrue (testParser programStringParser "
+                let expected = [ IntermediaryCommandNode [] ]
+                Expect.isTrue (testParser intermediaryProgramParser "
                     one, date {
                     plotplug 10px dashed red
                     }

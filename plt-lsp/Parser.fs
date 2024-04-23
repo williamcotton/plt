@@ -116,6 +116,12 @@ let calculatePosition msg (e : ParserError) (startPos : Position) =
     else
         (startPos.Index + int64 e.Position.Column - 1L, startPos.Line, startPos.Column + int64 e.Position.Column - 1L)
 
+/// <summary>
+/// Validates an intermediary AST node using the specified parser.
+/// </summary>
+/// <param name="parser">The parser to use for validation.</param>
+/// <param name="node">The intermediary AST node to validate.</param>
+/// <returns>The validated intermediary AST node.</returns>
 let validateIntermediaryNodeWithParser parser node =
     let parseNode content (startPos : Position) (endPos : Position) nodeType =
         match run parser content with
@@ -139,6 +145,11 @@ let actionValidatorParser =
 let fieldsValidatorParser =
     fieldsParser
 
+/// <summary>
+/// Validates a single intermediary AST node using the appropriate parser.
+/// </summary>
+/// <param name="node">The intermediary AST node to validate.</param>
+/// <returns>The validated intermediary AST node.</returns>
 let rec validateIntermediaryASTNode node =
     match node with
     | IntermediaryActionNode(_, _, _) -> validateIntermediaryNodeWithParser actionValidatorParser node
@@ -149,9 +160,19 @@ let rec validateIntermediaryASTNode node =
         IntermediaryCommandNode(validatedNodes)
     | IntermediaryEmptyNode -> node
 
+/// <summary>
+/// Validates an intermediary AST by applying specific parsers to each node.
+/// </summary>
+/// <param name="ast">The intermediary AST to validate.</param>
+/// <returns>The validated intermediary AST.</returns>
 let validateIntermediaryAST ast =
     List.map validateIntermediaryASTNode ast
 
+/// <summary>
+/// Parses a string into an intermediary Abstract Syntax Tree (AST).
+/// </summary>
+/// <param name="input">The input string to parse.</param>
+/// <returns>The parsed intermediary AST.</returns>
 let runAndValidate input =
     match run intermediaryProgramParser input with
     | Success(result, _, _) ->
@@ -159,6 +180,10 @@ let runAndValidate input =
     | Failure(errorMsg, e, _) ->
         [IntermediaryErrorNode ("Parsing error: " + (errorMsg.Trim().Split('\n') |> Array.last), e.Position, e.Position)]
 
+/// <summary>
+/// Prints an intermediary AST node.
+/// </summary>
+/// <param name="node">The intermediary AST node to print.</param>
 let rec printASTNode node =
     match node with
     | IntermediaryFieldsNode(s, _, _) -> printfn "Fields: %s" s
@@ -169,12 +194,21 @@ let rec printASTNode node =
         nodes |> List.iter printASTNode
     | IntermediaryEmptyNode -> ignore()
     
-
+/// <summary>
+/// Collects all error nodes from an intermediary AST node.
+/// </summary>
+/// <param name="astNode">The intermediary AST node to collect error nodes from.</param>
+/// <returns>A list of error nodes.</returns>
 let rec collectErrorNodes astNode =
     match astNode with
     | IntermediaryErrorNode(_, _, _) -> [astNode]
     | IntermediaryCommandNode(nodes) -> List.collect collectErrorNodes nodes
     | _ -> []
 
+/// <summary>
+/// Gets all error nodes from an intermediary AST.
+/// </summary>
+/// <param name="ast">The intermediary AST to collect error nodes from.</param>
+/// <returns>A list of error nodes.</returns>
 let getAllErrorNodes ast =
     List.collect collectErrorNodes ast

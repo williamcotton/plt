@@ -104,7 +104,6 @@ let intermediaryCommandErrorParser =
 let intermediaryProgramParser =
     many intermediaryCommandErrorParser
 
-
 let calculatePosition msg (e : ParserError) (startPos : Position) =
     let backtrackPattern = @"Error in Ln: (\d+) Col: (\d+)"
     let matches = Regex.Matches(msg, backtrackPattern)
@@ -112,9 +111,9 @@ let calculatePosition msg (e : ParserError) (startPos : Position) =
         let lastMatch = matches.[matches.Count - 1]
         let line = Int64.Parse(lastMatch.Groups.[1].Value)
         let col = Int64.Parse(lastMatch.Groups.[2].Value)
-        (startPos.Index + col, line + startPos.Line - 1L, startPos.Column + col - 1L)
+        (startPos.Index + col, line + startPos.Line - 1L, startPos.Column + col - 1L, e.Position.Column - 1L)
     else
-        (startPos.Index + int64 e.Position.Column - 1L, startPos.Line, startPos.Column + int64 e.Position.Column - 1L)
+        (startPos.Index + int64 e.Position.Column - 1L, startPos.Line, startPos.Column + int64 e.Position.Column - 1L, e.Position.Column - 1L)
 
 /// <summary>
 /// Validates an intermediary AST node using the specified parser.
@@ -127,8 +126,17 @@ let validateIntermediaryNodeWithParser parser node =
         match run parser content with
         | Success(_, _, _) -> node
         | Failure(msg, e, _) ->
-            let (index, line, column) = calculatePosition msg e startPos
+            let (index, line, column, endColumn) = calculatePosition msg e startPos
             let adjustedStartPos = Position(startPos.StreamName, index, line, column)
+            let substring = content.Substring(int(endColumn))
+            let endOfStringIndexNumber = 
+                match run stringContent substring with
+                | Success(restOfString, _, _) ->
+                    endColumn + int64(restOfString.Length) - 1L  // adjust index to be relative to the entire content string
+                | Failure(_, _, _) ->
+                    endPos.Column
+            printfn "Substring: %s" substring
+            printfn "End of string index number: %d" endOfStringIndexNumber
             let adjustedEndPos = Position(endPos.StreamName, endPos.Index, endPos.Line, endPos.Column - 1L)
             let errorDetail = msg.Trim().Split('\n') |> Array.last
             IntermediaryErrorNode(sprintf "%s - %s - %s" nodeType content errorDetail, adjustedStartPos, adjustedEndPos)

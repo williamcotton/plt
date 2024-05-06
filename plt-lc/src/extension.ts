@@ -1,51 +1,69 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
-import * as path from "path";
-import * as vscode from 'vscode';
+import { workspace, ExtensionContext, commands } from "vscode";
+
 import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
   TransportKind,
-  TextDocumentSyncKind,
 } from "vscode-languageclient/node";
 
 let client: LanguageClient;
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
-export function activate(context: vscode.ExtensionContext) {
-  // The server is implemented in an external executable (your language server)
-  const serverExecutablePath =
-    "/Users/williamcotton/Projects/plt/plt-lsp/bin/Debug/net8.0/plt-lsp";
+const restartClient = async () => {
+  const pltServerPath = "/Users/williamcotton/Projects/plt/plt-lsp/bin/Debug/net8.0/plt-lsp.dll";
+  const dotnetPath = "/Users/williamcotton/.asdf/shims/dotnet";
 
-  // Server options define how to start and communicate with the server
+  // If the extension is launched in debug mode then the debug server options are used
+  // Otherwise the run options are used
   const serverOptions: ServerOptions = {
-    run: { command: serverExecutablePath, transport: TransportKind.stdio },
-    debug: { command: serverExecutablePath, transport: TransportKind.stdio },
-  };
-
-  // Client options define how the client will interact with the server
-  const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: "file", language: "plt" }], // Replace 'plt' with your language ID
-    synchronize: {
-      fileEvents: vscode.workspace.createFileSystemWatcher("**/*.plt"), // Replace '*.plt' with your file extension
+    run: {
+      command: dotnetPath,
+      args: [pltServerPath],
+      transport: TransportKind.stdio,
     },
-    
+    debug: {
+      command: dotnetPath,
+      args: [pltServerPath],
+      transport: TransportKind.stdio,
+    },
   };
 
-  // Create the language client and start it
-  client = new LanguageClient(
-    "pltLanguageClient", // This can be any name for the client
-    "PLT Language Server", // This is the name that will appear in the UI
-    serverOptions,
-    clientOptions
+  // Options to control the language client
+  const clientOptions: LanguageClientOptions = {
+    // Register the server for plain text documents
+    documentSelector: [{ scheme: "file", language: "plt" }],
+    synchronize: {},
+  };
+
+  if (!client) {
+    // Create the language client and start the client.
+    client = new LanguageClient(
+      "plt",
+      "plt Server",
+      serverOptions,
+      clientOptions
+    );
+  }
+
+  if (client && client.isRunning()) {
+    await client.restart();
+  } else {
+    // Start the client. This will also launch the server
+    await client.start();
+  }
+};
+
+export function activate(context: ExtensionContext) {
+  context.subscriptions.push(
+    commands.registerCommand("plt.server.restart", () => {
+      // TODO: handle promise below
+      restartClient();
+    })
   );
 
-  client.start();
+  restartClient();
 }
 
-// This method is called when your extension is deactivated
 export function deactivate(): Thenable<void> | undefined {
   if (!client) {
     return undefined;
